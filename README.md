@@ -28,11 +28,12 @@
 
 - 🎧 **Audio Noise Reduction**: Spectral gating & adaptive filtering for `.wav`, `.mp3`, `.flac`, `.aac`, `.m4a`, `.ogg`. Eliminates background hum, AC/fan noise, hiss, and ambient rumble.
 - 🎬 **Video Track Processing**: Drop any `.mp4`, `.mkv`, `.mov`, or `.avi` video. Automatically extracts audio, reduces noise, and remuxes cleaned audio back into the video in seconds using **FFmpeg Lossless Stream-Copy (`-c:v copy`)** — zero re-encoding and 100% video clarity preserved.
+- ✂️ **Lossless Video Splitter & Trimmer**: Split videos into equal clips (15s, 30s for WhatsApp/Reels/Stories, 60s for Shorts, or custom parts) or custom `[Start - End]` time cuts with lossless stream-copy or simultaneous background audio denoising.
 - 🎵 **Direct Video Sound Extraction**: Dedicated tool & export modes to extract audio tracks from any video container into MP3 (320k), WAV (Lossless PCM), FLAC, AAC, or OGG — with options for raw untouched extraction or AI-denoised sound.
-- 📊 **Interactive Dual Waveform View**: Real-time side-by-side visual comparison of the original noisy signal vs. denoised output.
-- 🔁 **Instant A/B Audio Preview**: Gapless, live A/B audio switching during playback to audit sound quality before exporting.
+- 📊 **Interactive Dual Waveform View**: Real-time side-by-side visual comparison of the original noisy signal vs. denoised output with live SNR gain and noise attenuation metrics.
+- 🔁 **Instant 3-Way A/B/Δ Audio Preview**: Gapless live switching between Clean (B), Noise Only (Δ), and Original (A) during playback to audit sound quality before exporting.
 - ⚡ **Non-Blocking Multithreaded GUI**: Modern Studio Dark-Themed GUI (CustomTkinter) with smooth 60 FPS responsiveness.
-- 📦 **Batch Processing Queue**: Queue dozens of files with real-time progress indicators.
+- 📦 **Batch Processing Queue**: Queue multiple files with real-time progress indicators.
 
 ---
 
@@ -57,22 +58,34 @@ This project follows an authoritative documentation structure. For technical det
 
 ### 1. Prerequisites
 - Python 3.10+ installed
-- FFmpeg installed and added to `PATH` (or placed in `bin/`)
+- FFmpeg installed and added to `PATH` (or bundled automatically via `imageio-ffmpeg`)
 
-### 2. Setup
+### 2. Automatic 1-Click Setup (Windows)
+After cloning or doing a `git pull`, simply run:
+```cmd
+setup.bat
+```
+This automatically configures the `.venv` virtual environment, installs/upgrades all dependencies from `requirements.txt`, verifies FFmpeg, and prepares sample files.
+
+To launch the app at any time:
+```cmd
+run.bat
+```
+
+### 3. Manual Setup (Cross-Platform)
 ```bash
 # Clone the repository
 git clone https://github.com/sukantahui/python-audio-noise-reduction.git
 cd python-audio-noise-reduction
 
 # Create virtual environment
-python -m venv venv
+python -m venv .venv
 
 # Activate virtual environment
 # Windows:
-.\venv\Scripts\activate
+.\.venv\Scripts\activate
 # macOS/Linux:
-source venv/bin/activate
+source .venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt

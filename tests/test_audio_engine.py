@@ -17,6 +17,7 @@ def test_audio_denoise_noise_reduction(synthetic_noisy_audio):
         high_pass_hz=80.0,
         notch_50hz=True,
         noise_gate_db=-45.0,
+        auto_noise_profile=True,
         normalize=False
     )
 
@@ -33,6 +34,14 @@ def test_audio_denoise_noise_reduction(synthetic_noisy_audio):
     assert noise_attenuation_db >= 10.0, f"Expected >= 10dB noise reduction, got {noise_attenuation_db:.2f}dB"
 
 
+def test_extract_noise_profile(synthetic_noisy_audio):
+    """Verifies that automatic noise profiling finds a valid background noise window."""
+    noisy = synthetic_noisy_audio["noisy"]
+    sr = synthetic_noisy_audio["sr"]
+    profile = AudioDenoiseEngine.extract_noise_profile(noisy, sample_rate=sr, duration_sec=0.4)
+    assert profile is not None
+    assert len(profile) == int(sr * 0.4)
+
 
 def test_audio_analyzer_downsampling(synthetic_clean_audio):
     """Verifies that waveform downsampling produces matching min and max envelope arrays."""
@@ -42,10 +51,24 @@ def test_audio_analyzer_downsampling(synthetic_clean_audio):
     assert np.all(max_env >= min_env)
 
 
+def test_audio_analyzer_metrics(synthetic_noisy_audio):
+    """Verifies that AudioAnalyzer calculates valid audio quality metrics."""
+    noisy = synthetic_noisy_audio["noisy"]
+    sr = synthetic_noisy_audio["sr"]
+    denoised = AudioDenoiseEngine.process_audio(noisy, sample_rate=sr)
+
+    metrics = AudioAnalyzer.get_audio_metrics(noisy, denoised, sample_rate=sr)
+    assert "snr_gain_db" in metrics
+    assert "noise_attenuation_db" in metrics
+    assert "clean_noise_floor_dbfs" in metrics
+    assert metrics["snr_gain_db"] >= 0.0
+
+
 def test_audio_engine_presets():
     """Verifies that standard presets can be fetched and modified independently."""
     preset1 = AudioDenoiseEngine.get_preset("Default Studio Voice")
     assert preset1.reduction_strength == 0.80
+    assert preset1.voice_clarity_boost is True
 
     preset2 = AudioDenoiseEngine.get_preset("Mild Background Hiss")
     assert preset2.reduction_strength == 0.55

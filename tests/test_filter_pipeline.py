@@ -45,6 +45,41 @@ def test_notch_filter(sample_rate):
     assert filtered_pwr < (orig_pwr * 0.05)
 
 
+def test_de_hum_harmonics(sample_rate):
+    """Verifies that harmonic de-hum removes 50Hz, 100Hz, and 150Hz overtones."""
+    t = np.linspace(0, 1.0, sample_rate, endpoint=False)
+    h1 = np.sin(2 * np.pi * 50 * t)
+    h2 = 0.5 * np.sin(2 * np.pi * 100 * t)
+    h3 = 0.25 * np.sin(2 * np.pi * 150 * t)
+    combined = (h1 + h2 + h3).astype(np.float32)
+
+    cleaned = FilterPipeline.de_hum_harmonics(combined, sample_rate=sample_rate, base_freq_hz=50.0, num_harmonics=3)
+    assert np.mean(cleaned ** 2) < (np.mean(combined ** 2) * 0.1)
+
+
+def test_voice_presence_boost(sample_rate):
+    """Verifies that voice presence boost boosts energy in the 3.4kHz vocal intelligibility band."""
+    t = np.linspace(0, 1.0, sample_rate, endpoint=False)
+    vocal_tone = np.sin(2 * np.pi * 3400 * t).astype(np.float32)
+
+    boosted = FilterPipeline.voice_presence_boost(vocal_tone, sample_rate=sample_rate, gain_db=3.0, freq_hz=3400.0)
+    assert np.max(np.abs(boosted)) > np.max(np.abs(vocal_tone))
+
+
+def test_vectorized_noise_gate(sample_rate):
+    """Verifies that vectorized noise gate silences low-level noise while preserving loud signals."""
+    t = np.linspace(0, 1.0, sample_rate, endpoint=False)
+    loud = 0.8 * np.sin(2 * np.pi * 440 * t)
+    quiet_noise = 0.001 * np.random.normal(0, 1, sample_rate)
+    signal_with_pause = np.concatenate([loud, quiet_noise]).astype(np.float32)
+
+    gated = FilterPipeline.noise_gate(signal_with_pause, threshold_db=-40.0, sample_rate=sample_rate)
+    # The noise-only segment should be significantly attenuated
+    noise_seg_before = signal_with_pause[sample_rate:]
+    noise_seg_after = gated[sample_rate:]
+    assert np.mean(noise_seg_after ** 2) <= np.mean(noise_seg_before ** 2)
+
+
 def test_peak_normalization():
     """Verifies normalization to target peak dBFS."""
     audio = np.array([0.1, -0.2, 0.4, -0.3], dtype=np.float32)

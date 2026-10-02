@@ -17,6 +17,7 @@ from src.gui.components.settings_panel import SettingsPanel
 from src.gui.components.batch_queue_view import BatchQueueView
 from src.gui.components.about_dialog import AboutDialog
 from src.gui.components.extract_dialog import ExtractAudioDialog
+from src.gui.components.video_splitter_dialog import VideoSplitterDialog
 
 from src.core.audio_engine import AudioDenoiseEngine, DenoiseConfig
 from src.core.video_engine import VideoEngine
@@ -113,7 +114,7 @@ class NoiseReliefApp(ctk.CTk):
 
         self.app_subheading = ctk.CTkLabel(
             self.title_text_box,
-            text="AI-Enhanced Spectral Denoising & Lossless Video Remuxing",
+            text="AI-Enhanced Spectral Denoising, Video Splitting & Lossless Remuxing",
             font=Theme.FONT_SMALL,
             text_color=Theme.TEXT_SECONDARY,
             anchor="w"
@@ -185,7 +186,8 @@ class NoiseReliefApp(ctk.CTk):
         self.drop_zone = DropZone(
             self.left_frame,
             on_file_selected=self._on_media_loaded,
-            on_extract_audio=self._open_extract_dialog
+            on_extract_audio=self._open_extract_dialog,
+            on_split_video=self._open_video_splitter_dialog
         )
         self.drop_zone.grid(row=0, column=0, sticky="ew", pady=(0, 8))
 
@@ -219,7 +221,8 @@ class NoiseReliefApp(ctk.CTk):
         self.export_view = BatchQueueView(
             self,
             on_export_start=self._on_export_requested,
-            on_extract_audio_request=lambda: self._open_extract_dialog(self.current_media_path)
+            on_extract_audio_request=lambda: self._open_extract_dialog(self.current_media_path),
+            on_split_video_request=lambda: self._open_video_splitter_dialog(self.current_media_path)
         )
         self.export_view.grid(row=2, column=0, columnspan=2, sticky="ew", padx=16, pady=(6, 14))
 
@@ -369,8 +372,26 @@ class NoiseReliefApp(ctk.CTk):
                     else:
                         AudioIO.save_audio(self.current_raw_audio, self.sample_rate, out_path)
                     _progress_cb(100.0, f"Exported: {out_path.name}")
+                elif "Noise Track Only" in video_mode:
+                    # Export isolated noise profile (Delta)
+                    if self.current_clean_audio is None:
+                        clean_audio = AudioDenoiseEngine.process_audio(
+                            audio=self.current_raw_audio,
+                            sample_rate=self.sample_rate,
+                            config=config,
+                            progress_callback=_progress_cb
+                        )
+                    else:
+                        clean_audio = self.current_clean_audio
+
+                    min_len = min(self.current_raw_audio.shape[-1], clean_audio.shape[-1])
+                    delta_audio = self.current_raw_audio[..., :min_len] - clean_audio[..., :min_len]
+                    out_audio_name = f"{stem}_noise_track.wav"
+                    out_path = output_dir / out_audio_name
+                    AudioIO.save_audio(delta_audio, self.sample_rate, out_path)
+                    _progress_cb(100.0, f"Exported Noise Track: {out_path.name}")
                 else:
-                    # Export Cleaned Audio (WAV, MP3, FLAC, AAC)
+                    # Export Cleaned Audio (WAV, MP3, FLAC, AAC, OGG)
                     if self.current_clean_audio is None:
                         clean_audio = AudioDenoiseEngine.process_audio(
                             audio=self.current_raw_audio,
@@ -387,6 +408,8 @@ class NoiseReliefApp(ctk.CTk):
                         out_audio_name = f"{stem}_cleaned.flac"
                     elif "AAC" in video_mode or "M4A" in video_mode:
                         out_audio_name = f"{stem}_cleaned.m4a"
+                    elif "OGG" in video_mode or src_path.suffix.lower() == ".ogg":
+                        out_audio_name = f"{stem}_cleaned.ogg"
                     else:
                         out_audio_name = f"{stem}_cleaned.wav"
 
@@ -410,6 +433,17 @@ class NoiseReliefApp(ctk.CTk):
             default_video_path=target_video,
             denoise_config=config,
             on_success=lambda p: self.export_view.update_progress(100.0, f"Extracted: {p.name}")
+        )
+
+    def _open_video_splitter_dialog(self, target_video_path: Optional[Path] = None) -> None:
+        """Opens the Video Splitter & Trimmer modal dialog."""
+        target_video = target_video_path or self.current_media_path
+        config = self.settings_panel.get_config()
+        VideoSplitterDialog(
+            parent=self,
+            default_video_path=target_video,
+            denoise_config=config,
+            on_success=lambda files: self.export_view.update_progress(100.0, f"Split into {len(files)} video clips")
         )
 
     def _open_about_dialog(self) -> None:

@@ -99,6 +99,77 @@ class FFmpegHelper:
             return False
 
     @classmethod
+    def get_media_duration(cls, path: Path | str) -> float:
+        """Extracts exact duration in seconds of a media file via FFmpeg."""
+        p = Path(path)
+        if not p.exists():
+            return 0.0
+        ffmpeg_bin = cls.get_ffmpeg_path()
+        cmd = [ffmpeg_bin, "-i", str(p)]
+        try:
+            res = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                timeout=5
+            )
+            stderr_text = res.stderr.decode("utf-8", errors="ignore")
+            import re
+            match = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.?\d*)", stderr_text)
+            if match:
+                hours = float(match.group(1))
+                minutes = float(match.group(2))
+                seconds = float(match.group(3))
+                return hours * 3600.0 + minutes * 60.0 + seconds
+            return 0.0
+        except Exception as ex:
+            logger.debug(f"Could not probe media duration: {ex}")
+            return 0.0
+
+    @classmethod
+    def split_video_segment(
+        cls,
+        video_path: Path | str,
+        output_path: Path | str,
+        start_sec: float,
+        duration_sec: Optional[float] = None,
+        stream_copy: bool = True
+    ) -> bool:
+        """Splits or trims a video segment using fast lossless stream copy or accurate re-encode."""
+        v_path = Path(video_path)
+        out_path = Path(output_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        ffmpeg_bin = cls.get_ffmpeg_path()
+
+        cmd = [
+            ffmpeg_bin, "-y",
+            "-ss", f"{max(0.0, start_sec):.3f}",
+            "-i", str(v_path),
+        ]
+        if duration_sec is not None and duration_sec > 0:
+            cmd.extend(["-t", f"{duration_sec:.3f}"])
+
+        if stream_copy:
+            cmd.extend(["-c", "copy", "-avoid_negative_ts", "make_zero", str(out_path)])
+        else:
+            cmd.extend(["-c:v", "libx264", "-c:a", "aac", "-b:a", "320k", str(out_path)])
+
+        logger.info(f"Splitting video segment: {' '.join(cmd)}")
+        try:
+            res = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                check=True
+            )
+            return out_path.exists() and out_path.stat().st_size > 0
+        except subprocess.CalledProcessError as ex:
+            logger.error(f"FFmpeg video split failed: {ex.stderr.decode('utf-8', errors='ignore')}")
+            raise RuntimeError(f"Video splitting failed: {ex}")
+
+    @classmethod
     def is_video_file(cls, path: Path | str) -> bool:
         """Checks if a file has a common video container extension."""
         video_extensions = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".flv", ".wmv", ".m4v", ".ts"}

@@ -1,14 +1,14 @@
-"""Interactive Dual Waveform Visualizer displaying Before and After waveforms with synchronized playhead."""
+"""Interactive Dual Waveform Visualizer displaying Before and After waveforms with metrics and synchronized playhead."""
 import tkinter as tk
 import customtkinter as ctk
 import numpy as np
-from typing import Optional, Callable, Tuple
+from typing import Optional, Callable, Tuple, Dict, Any
 from src.gui.theme import Theme
 from src.core.audio_analyzer import AudioAnalyzer
 
 
 class WaveformWidget(ctk.CTkFrame):
-    """Dual visual waveform comparison widget with real-time seeking playhead."""
+    """Dual visual waveform comparison widget with real-time seeking playhead and audio quality metrics."""
 
     def __init__(
         self,
@@ -35,8 +35,6 @@ class WaveformWidget(ctk.CTkFrame):
 
         self.duration: float = 0.0
         self.current_pos_sec: float = 0.0
-        self.snr_orig_str: str = "-- dB"
-        self.snr_clean_str: str = "-- dB"
 
         self._build_ui()
 
@@ -47,26 +45,30 @@ class WaveformWidget(ctk.CTkFrame):
 
         self.title_label = ctk.CTkLabel(
             self.header_frame,
-            text="📊  Dual Waveform Analysis (Before vs After)",
+            text="📊  Audio Waveform Analysis & Noise Attenuation",
             font=Theme.FONT_SUBTITLE,
             text_color=Theme.TEXT_PRIMARY
         )
         self.title_label.pack(side="left")
 
+        # Metric Chips
+        self.metrics_box = ctk.CTkFrame(self.header_frame, fg_color=Theme.BG_DARK, corner_radius=4)
+        self.metrics_box.pack(side="right")
+
         self.snr_badge = ctk.CTkLabel(
-            self.header_frame,
-            text="SNR: Original [-- dB]  ➔  Cleaned [-- dB]",
+            self.metrics_box,
+            text="SNR Gain: -- dB | Noise Floor: -- dBFS",
             font=Theme.FONT_SMALL,
             text_color=Theme.ACCENT_CYAN
         )
-        self.snr_badge.pack(side="right")
+        self.snr_badge.pack(side="right", padx=8, pady=2)
 
         # Tkinter Canvas for high-performance waveform rendering
         self.canvas = tk.Canvas(
             self,
             bg=Theme.CANVAS_BG,
             highlightthickness=0,
-            cursor="hand2"
+            cursor="crosshair"
         )
         self.canvas.pack(fill="both", expand=True, padx=12, pady=(0, 8))
 
@@ -80,7 +82,7 @@ class WaveformWidget(ctk.CTkFrame):
         clean_audio: Optional[np.ndarray],
         sample_rate: int,
         duration: float,
-        snr_improvement_db: Optional[float] = None
+        metrics: Optional[Dict[str, Any]] = None
     ) -> None:
         """Computes and stores downsampled waveform envelopes for rendering."""
         self.duration = max(duration, 0.001)
@@ -90,133 +92,155 @@ class WaveformWidget(ctk.CTkFrame):
 
         if clean_audio is not None:
             self.clean_min_env, self.clean_max_env = AudioAnalyzer.downsample_waveform(clean_audio, num_bins=1000)
-            orig_snr = AudioAnalyzer.estimate_noise_floor_dbfs(orig_audio)
-            clean_snr = AudioAnalyzer.estimate_noise_floor_dbfs(clean_audio)
-            delta_snr = snr_improvement_db if snr_improvement_db is not None else AudioAnalyzer.estimate_snr_db(orig_audio, clean_audio)
+            if metrics is None:
+                metrics = AudioAnalyzer.get_audio_metrics(orig_audio, clean_audio, sample_rate)
+
+            snr_gain = metrics["snr_gain_db"]
+            noise_att = metrics["noise_attenuation_db"]
+            clean_floor = metrics["clean_noise_floor_dbfs"]
+
             self.snr_badge.configure(
-                text=f"Noise Floor: {orig_snr:.1f} dBFS ➔ {clean_snr:.1f} dBFS | SNR Gain: +{delta_snr:.1f} dB"
+                text=f"✨ SNR Gain: +{snr_gain:.1f} dB  |  Floor: {clean_floor:.1f} dBFS (-{noise_att:.1f} dB cut)"
             )
         else:
             self.clean_min_env, self.clean_max_env = None, None
-            self.snr_badge.configure(text="Processing clean preview...")
+            self.snr_badge.configure(text="Ready to process")
 
         self.redraw()
 
     def update_playhead(self, current_sec: float) -> None:
-        """Updates playhead vertical line position."""
         self.current_pos_sec = current_sec
+        self._draw_playhead()
+
+    def _on_resize(self, event) -> None:
         self.redraw()
 
-    def redraw(self) -> None:
-        """Redraws waveform canvases, grids, centerlines, and playhead."""
-        self.canvas.delete("all")
+    def _on_canvas_click(self, event) -> None:
+        if self.duration <= 0:
+            return
         width = self.canvas.winfo_width()
-        height = self.canvas.winfo_height()
+        if width > 0:
+            ratio = max(0.0, min(1.0, event.x / float(width)))
+            target_sec = ratio * self.duration
+            if self.on_seek:
+                self.on_seek(target_sec)
 
-        if width <= 10 or height <= 10:
+    def redraw(self) -> None:
+        self.canvas.delete("all")
+        w = self.canvas.winfo_width()
+        h = self.canvas.winfo_height()
+        if w < 10 or h < 10:
             return
 
-        half_h = height / 2.0
+        # Background grid lines & centerlines
+        half_h = h / 2.0
+        quad1 = h / 4.0
+        quad3 = 3.0 * h / 4.0
 
-        # Draw Divider Line between Top (Original) and Bottom (Clean)
-        self.canvas.create_line(0, half_h, width, half_h, fill=Theme.CARD_BORDER, width=1, dash=(4, 4))
+        # Draw division line between Top (Original Noisy) and Bottom (Denoised Clean)
+        self.canvas.create_line(0, half_h, w, half_h, fill="#27272A", width=1, dash=(4, 4))
+        self.canvas.create_line(0, quad1, w, quad1, fill="#18181B", width=1)
+        self.canvas.create_line(0, quad3, w, quad3, fill="#18181B", width=1)
 
-        # 1. Draw Top Strip: Original Noisy Waveform
+        # Labels
         self.canvas.create_text(
             10, 12,
+            text="ORIGINAL (NOISY TRACK)",
             anchor="w",
-            text="ORIGINAL (NOISY)",
             fill=Theme.ACCENT_DIRTY,
-            font=("Segoe UI", 8, "bold")
+            font=("Segoe UI", 9, "bold")
         )
-
-        top_center_y = half_h / 2.0
-        self.canvas.create_line(0, top_center_y, width, top_center_y, fill="#232B3E", width=1)
-
-        if self.orig_min_env is not None and len(self.orig_min_env) > 0:
-            self._draw_envelope(
-                self.orig_min_env,
-                self.orig_max_env,
-                width=width,
-                center_y=top_center_y,
-                max_amplitude_h=half_h * 0.42,
-                color=Theme.ACCENT_DIRTY
-            )
-
-        # 2. Draw Bottom Strip: Clean Denoised Waveform
         self.canvas.create_text(
             10, half_h + 12,
+            text="DENOISED (CLEAN TRACK)",
             anchor="w",
-            text="DENOISED (CLEAN)",
             fill=Theme.ACCENT_CLEAN,
-            font=("Segoe UI", 8, "bold")
+            font=("Segoe UI", 9, "bold")
         )
 
-        bot_center_y = half_h + (half_h / 2.0)
-        self.canvas.create_line(0, bot_center_y, width, bot_center_y, fill="#232B3E", width=1)
+        # Render Top: Original Waveform
+        if self.orig_min_env is not None and self.orig_max_env is not None:
+            self._render_single_waveform(
+                min_env=self.orig_min_env,
+                max_env=self.orig_max_env,
+                center_y=quad1,
+                max_amplitude=quad1 * 0.90,
+                color=Theme.ACCENT_DIRTY,
+                fill_color="#2D1515"
+            )
 
-        if self.clean_min_env is not None and len(self.clean_min_env) > 0:
-            self._draw_envelope(
-                self.clean_min_env,
-                self.clean_max_env,
-                width=width,
-                center_y=bot_center_y,
-                max_amplitude_h=half_h * 0.42,
-                color=Theme.ACCENT_CLEAN
+        # Render Bottom: Clean Waveform
+        if self.clean_min_env is not None and self.clean_max_env is not None:
+            self._render_single_waveform(
+                min_env=self.clean_min_env,
+                max_env=self.clean_max_env,
+                center_y=quad3,
+                max_amplitude=quad1 * 0.90,
+                color=Theme.ACCENT_CLEAN,
+                fill_color="#0F2D1F"
             )
         elif self.orig_min_env is not None:
+            # Placeholder text if not yet calculated
             self.canvas.create_text(
-                width / 2.0, bot_center_y,
-                text="[ Denoising in progress... Click 'Preview Denoise' to update ]",
+                w / 2.0, quad3,
+                text="Click 'APPLY & UPDATE PREVIEW' to generate clean output waveform",
                 fill=Theme.TEXT_MUTED,
-                font=Theme.FONT_SMALL
+                font=Theme.FONT_BODY
             )
 
-        # 3. Draw Playhead
-        if self.duration > 0:
-            norm_pos = min(max(self.current_pos_sec / self.duration, 0.0), 1.0)
-            playhead_x = norm_pos * width
+        self._draw_playhead()
 
-            # Glow line and main line
-            self.canvas.create_line(playhead_x, 0, playhead_x, height, fill=Theme.ACCENT_CYAN, width=2)
-            self.canvas.create_polygon(
-                playhead_x - 5, 0,
-                playhead_x + 5, 0,
-                playhead_x, 8,
-                fill=Theme.ACCENT_CYAN,
-                outline=""
-            )
-
-    def _draw_envelope(
+    def _render_single_waveform(
         self,
         min_env: np.ndarray,
         max_env: np.ndarray,
-        width: float,
         center_y: float,
-        max_amplitude_h: float,
-        color: str
+        max_amplitude: float,
+        color: str,
+        fill_color: str
     ) -> None:
-        """Renders vertical bars or polygon fill for waveform envelopes."""
+        w = self.canvas.winfo_width()
         num_points = len(min_env)
-        step = width / float(num_points)
+        if num_points < 2 or w <= 0:
+            return
 
-        for i in range(num_points):
-            x = i * step
-            y_top = center_y - (max_env[i] * max_amplitude_h)
-            y_bot = center_y - (min_env[i] * max_amplitude_h)
-            # Ensure minimum 1px height
-            if abs(y_bot - y_top) < 1.0:
-                y_top = center_y - 0.5
-                y_bot = center_y + 0.5
-            self.canvas.create_line(x, y_top, x, y_bot, fill=color, width=max(1, int(step)))
+        # Downsample or step across width
+        xs = np.linspace(0, w, num_points)
+        top_ys = center_y - (max_env * max_amplitude)
+        bot_ys = center_y - (min_env * max_amplitude)
 
-    def _on_resize(self, event: any) -> None:
-        self.redraw()
+        # Draw vertical slice lines for crisp DAW style rendering
+        step = max(1, int(num_points / w))
+        for i in range(0, num_points, step):
+            x = xs[i]
+            y1 = max(center_y - max_amplitude, min(center_y + max_amplitude, top_ys[i]))
+            y2 = max(center_y - max_amplitude, min(center_y + max_amplitude, bot_ys[i]))
+            if abs(y2 - y1) < 1.0:
+                y2 = y1 + 1.0
+            self.canvas.create_line(x, y1, x, y2, fill=color, width=1)
 
-    def _on_canvas_click(self, event: tk.Event) -> None:
-        width = self.canvas.winfo_width()
-        if width > 0 and self.duration > 0 and self.on_seek:
-            ratio = min(max(event.x / width, 0.0), 1.0)
-            target_sec = ratio * self.duration
-            self.update_playhead(target_sec)
-            self.on_seek(target_sec)
+    def _draw_playhead(self) -> None:
+        self.canvas.delete("playhead")
+        if self.duration <= 0:
+            return
+
+        w = self.canvas.winfo_width()
+        h = self.canvas.winfo_height()
+        playhead_x = (self.current_pos_sec / self.duration) * w
+
+        # Draw glowing playhead vertical cursor line
+        self.canvas.create_line(
+            playhead_x, 0,
+            playhead_x, h,
+            fill=Theme.ACCENT_CYAN,
+            width=2,
+            tags="playhead"
+        )
+        # Top head triangle marker
+        self.canvas.create_polygon(
+            playhead_x - 5, 0,
+            playhead_x + 5, 0,
+            playhead_x, 8,
+            fill=Theme.ACCENT_CYAN,
+            tags="playhead"
+        )

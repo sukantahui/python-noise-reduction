@@ -1,4 +1,4 @@
-"""Integration tests for the Video Engine (Audio extraction and Lossless Remuxing)."""
+"""Integration tests for the Video Engine (Audio extraction, Lossless Remuxing, and Video Splitting)."""
 import pytest
 import numpy as np
 import soundfile as sf
@@ -13,15 +13,14 @@ import os
 
 @pytest.fixture
 def synthetic_video_file(tmp_path) -> Path:
-    """Generates a short 2-second synthetic MP4 test video with noisy audio using FFmpeg."""
+    """Generates a short 3-second synthetic MP4 test video with noisy audio using FFmpeg."""
     ffmpeg_bin = FFmpegHelper.get_ffmpeg_path()
     video_path = tmp_path / "synthetic_test.mp4"
 
-    # Generate synthetic video: 2-second color test pattern with 440Hz sine + noise audio
     cmd = [
         ffmpeg_bin, "-y",
-        "-f", "lavfi", "-i", "testsrc=duration=2:size=320x240:rate=30",
-        "-f", "lavfi", "-i", "anoisesrc=d=2:c=pink:r=44100:a=0.1",
+        "-f", "lavfi", "-i", "testsrc=duration=3:size=320x240:rate=30",
+        "-f", "lavfi", "-i", "anoisesrc=d=3:c=pink:r=44100:a=0.1",
         "-c:v", "libx264", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "128k",
         "-shortest",
@@ -66,6 +65,50 @@ def test_video_end_to_end_denoising(synthetic_video_file, tmp_path):
     assert result_path.stat().st_size > 0
 
 
+def test_video_trim_range(synthetic_video_file, tmp_path):
+    """Verifies trimming a specific time interval from a video."""
+    trimmed_video = tmp_path / "trimmed_clip.mp4"
+    res = VideoEngine.trim_video_range(
+        video_path=synthetic_video_file,
+        start_sec=0.5,
+        end_sec=2.0,
+        output_path=trimmed_video,
+        denoise=False
+    )
+    assert res.exists()
+    assert res.stat().st_size > 0
+
+
+def test_video_split_by_duration(synthetic_video_file, tmp_path):
+    """Verifies splitting video into 1-second segment clips."""
+    split_dir = tmp_path / "split_clips"
+    clips = VideoEngine.split_video_by_duration(
+        video_path=synthetic_video_file,
+        segment_duration_sec=1.0,
+        output_dir=split_dir,
+        denoise=False
+    )
+    assert len(clips) >= 2
+    for c in clips:
+        assert c.exists()
+        assert c.stat().st_size > 0
+
+
+def test_video_split_by_parts(synthetic_video_file, tmp_path):
+    """Verifies splitting video into 2 equal parts."""
+    parts_dir = tmp_path / "parts_output"
+    parts = VideoEngine.split_video_by_parts(
+        video_path=synthetic_video_file,
+        num_parts=2,
+        output_dir=parts_dir,
+        denoise=False
+    )
+    assert len(parts) == 2
+    for p in parts:
+        assert p.exists()
+        assert p.stat().st_size > 0
+
+
 def test_video_extract_sound_raw_formats(synthetic_video_file, tmp_path):
     """Verifies raw audio extraction to MP3, FLAC, and WAV."""
     mp3_out = tmp_path / "extracted.mp3"
@@ -105,4 +148,3 @@ def test_video_extract_sound_denoised(synthetic_video_file, tmp_path):
     data, sr = sf.read(str(res))
     assert sr == 48000
     assert len(data) > 0
-

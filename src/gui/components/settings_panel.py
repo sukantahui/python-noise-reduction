@@ -1,4 +1,4 @@
-"""Settings panel widget with algorithm presets and fine-grained DSP parameter controls."""
+"""Settings panel widget with algorithm presets, voice clarity, and fine-grained DSP parameter controls."""
 import customtkinter as ctk
 from typing import Callable, Optional
 from src.gui.theme import Theme
@@ -33,7 +33,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         # Title
         self.title_label = ctk.CTkLabel(
             self,
-            text="⚙️  DSP Denoising Parameters",
+            text="⚙️  DSP Denoising & Audio Enhancement",
             font=Theme.FONT_SUBTITLE,
             text_color=Theme.TEXT_PRIMARY
         )
@@ -93,7 +93,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.strength_slider.set(0.80)
         self.strength_slider.pack(fill="x", padx=10, pady=(2, 10))
 
-        # 3. Noise Profile Mode (Stationary vs Dynamic)
+        # 3. Noise Profile Mode & Auto-Learn
         self.mode_label = ctk.CTkLabel(
             self,
             text="Noise Profiling Mode:",
@@ -104,7 +104,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
 
         self.mode_var = ctk.StringVar(value="stationary")
         self.mode_row = ctk.CTkFrame(self, fg_color="transparent")
-        self.mode_row.pack(fill="x", padx=10, pady=(0, 10))
+        self.mode_row.pack(fill="x", padx=10, pady=(0, 6))
 
         self.rad_stat = ctk.CTkRadioButton(
             self.mode_row,
@@ -128,7 +128,37 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         )
         self.rad_dyn.pack(side="left")
 
-        # 4. High-Pass Filter (Rumble Cut)
+        # 4. Voice Presence / Clarity Booster
+        self.voice_header = ctk.CTkFrame(self, fg_color="transparent")
+        self.voice_header.pack(fill="x", padx=10, pady=(4, 0))
+        self.voice_title = ctk.CTkLabel(
+            self.voice_header,
+            text="✨ Speech Clarity & Presence:",
+            font=Theme.FONT_BODY,
+            text_color=Theme.TEXT_PRIMARY
+        )
+        self.voice_title.pack(side="left")
+        self.voice_val_lbl = ctk.CTkLabel(
+            self.voice_header,
+            text="+2.5 dB",
+            font=Theme.FONT_BODY,
+            text_color=Theme.ACCENT_CYAN
+        )
+        self.voice_val_lbl.pack(side="right")
+
+        self.voice_slider = ctk.CTkSlider(
+            self,
+            from_=0.0,
+            to=6.0,
+            number_of_steps=24,
+            progress_color=Theme.ACCENT_CYAN,
+            button_color=Theme.ACCENT_CYAN,
+            command=self._on_voice_drag
+        )
+        self.voice_slider.set(2.5)
+        self.voice_slider.pack(fill="x", padx=10, pady=(2, 10))
+
+        # 5. High-Pass Filter (Rumble Cut)
         self.hp_header = ctk.CTkFrame(self, fg_color="transparent")
         self.hp_header.pack(fill="x", padx=10, pady=(4, 0))
         self.hp_title = ctk.CTkLabel(
@@ -158,7 +188,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.hp_slider.set(80)
         self.hp_slider.pack(fill="x", padx=10, pady=(2, 10))
 
-        # 5. Low-Pass Filter (High Hiss Cut)
+        # 6. Low-Pass Filter (High Hiss Cut)
         self.lp_header = ctk.CTkFrame(self, fg_color="transparent")
         self.lp_header.pack(fill="x", padx=10, pady=(4, 0))
         self.lp_title = ctk.CTkLabel(
@@ -188,7 +218,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.lp_slider.set(0)
         self.lp_slider.pack(fill="x", padx=10, pady=(2, 10))
 
-        # 6. Time Smoothing & Noise Gate
+        # 7. Time Smoothing
         self.smooth_header = ctk.CTkFrame(self, fg_color="transparent")
         self.smooth_header.pack(fill="x", padx=10, pady=(4, 0))
         self.smooth_title = ctk.CTkLabel(
@@ -218,9 +248,19 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.smooth_slider.set(3)
         self.smooth_slider.pack(fill="x", padx=10, pady=(2, 10))
 
-        # 7. Checkboxes: Peak Normalization, Noise Gate, Electrical Notches
+        # 8. Checkboxes: Peak Normalization, Noise Gate, Electrical Notches & Harmonics
         self.toggles_frame = ctk.CTkFrame(self, fg_color=Theme.BG_DARK, corner_radius=Theme.CORNER_RADIUS_SM)
         self.toggles_frame.pack(fill="x", padx=10, pady=(6, 12))
+
+        self.learn_noise_chk = ctk.CTkCheckBox(
+            self.toggles_frame,
+            text="Auto-Sample Background Noise Profile",
+            font=Theme.FONT_BODY,
+            fg_color=Theme.ACCENT_CLEAN,
+            command=self._on_toggle_change
+        )
+        self.learn_noise_chk.select()
+        self.learn_noise_chk.pack(anchor="w", padx=10, pady=(8, 4))
 
         self.norm_chk = ctk.CTkCheckBox(
             self.toggles_frame,
@@ -230,7 +270,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             command=self._on_toggle_change
         )
         self.norm_chk.select()
-        self.norm_chk.pack(anchor="w", padx=10, pady=(8, 4))
+        self.norm_chk.pack(anchor="w", padx=10, pady=4)
 
         self.gate_chk = ctk.CTkCheckBox(
             self.toggles_frame,
@@ -249,18 +289,18 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             fg_color=Theme.ACCENT_CLEAN,
             command=self._on_toggle_change
         )
-        self.notch_50_chk.pack(anchor="w", padx=10, pady=(4, 4))
+        self.notch_50_chk.pack(anchor="w", padx=10, pady=4)
 
-        self.notch_60_chk = ctk.CTkCheckBox(
+        self.harmonics_chk = ctk.CTkCheckBox(
             self.toggles_frame,
-            text="Cut 60Hz Mains Hum (US/Americas)",
+            text="Harmonic De-Hum (100Hz/150Hz/200Hz)",
             font=Theme.FONT_SMALL,
             fg_color=Theme.ACCENT_CLEAN,
             command=self._on_toggle_change
         )
-        self.notch_60_chk.pack(anchor="w", padx=10, pady=(4, 8))
+        self.harmonics_chk.pack(anchor="w", padx=10, pady=(4, 8))
 
-        # 8. Re-calculate / Preview Denoise Button
+        # 9. Re-calculate / Preview Denoise Button
         self.preview_btn = ctk.CTkButton(
             self,
             text="⚡  APPLY & UPDATE PREVIEW",
@@ -286,6 +326,8 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.lp_val_lbl.configure(text=f"{int(p.low_pass_hz)} Hz" if p.low_pass_hz > 0 else "Disabled (Full)")
         self.smooth_slider.set(p.time_smoothing)
         self.smooth_val_lbl.configure(text=f"{p.time_smoothing} frames")
+        self.voice_slider.set(p.voice_boost_db if p.voice_clarity_boost else 0.0)
+        self.voice_val_lbl.configure(text=f"+{p.voice_boost_db:.1f} dB" if p.voice_clarity_boost else "Off")
 
         if p.normalize:
             self.norm_chk.select()
@@ -297,11 +339,33 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         else:
             self.gate_chk.deselect()
 
+        if p.notch_50hz:
+            self.notch_50_chk.select()
+        else:
+            self.notch_50_chk.deselect()
+
+        if p.de_hum_harmonics:
+            self.harmonics_chk.select()
+        else:
+            self.harmonics_chk.deselect()
+
+        if p.auto_noise_profile:
+            self.learn_noise_chk.select()
+        else:
+            self.learn_noise_chk.deselect()
+
         self._notify_change()
 
     def _on_strength_drag(self, val: float) -> None:
         self.config.reduction_strength = float(val)
         self.strength_val_lbl.configure(text=f"{int(val * 100)}%")
+        self._notify_change()
+
+    def _on_voice_drag(self, val: float) -> None:
+        gain = round(float(val), 1)
+        self.config.voice_boost_db = gain
+        self.config.voice_clarity_boost = gain > 0.2
+        self.voice_val_lbl.configure(text=f"+{gain:.1f} dB" if gain > 0.2 else "Off")
         self._notify_change()
 
     def _on_mode_change(self) -> None:
@@ -330,7 +394,8 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.config.normalize = bool(self.norm_chk.get())
         self.config.noise_gate_db = -48.0 if bool(self.gate_chk.get()) else -90.0
         self.config.notch_50hz = bool(self.notch_50_chk.get())
-        self.config.notch_60hz = bool(self.notch_60_chk.get())
+        self.config.de_hum_harmonics = bool(self.harmonics_chk.get())
+        self.config.auto_noise_profile = bool(self.learn_noise_chk.get())
         self._notify_change()
 
     def _notify_change(self) -> None:

@@ -246,3 +246,138 @@ class VideoEngine:
         finally:
             TempManager.remove_file(temp_extracted_wav)
             TempManager.remove_file(temp_cleaned_wav)
+
+    @classmethod
+    def trim_video_range(
+        cls,
+        video_path: Path | str,
+        start_sec: float,
+        end_sec: float,
+        output_path: Path | str,
+        denoise: bool = False,
+        config: Optional[DenoiseConfig] = None,
+        progress_callback: Optional[Callable[[float, str], None]] = None
+    ) -> Path:
+        """Trims a specific time range [start_sec, end_sec] from a video with optional audio denoising."""
+        v_path = Path(video_path)
+        out_path = Path(output_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        duration = max(0.1, end_sec - start_sec)
+
+        if not denoise:
+            if progress_callback:
+                progress_callback(30.0, f"Trimming video segment ({start_sec:.1f}s - {end_sec:.1f}s)...")
+            FFmpegHelper.split_video_segment(
+                video_path=v_path,
+                output_path=out_path,
+                start_sec=start_sec,
+                duration_sec=duration,
+                stream_copy=True
+            )
+            if progress_callback:
+                progress_callback(100.0, f"Trimmed: {out_path.name}")
+            return out_path
+
+        # Trim first, then denoise
+        temp_trimmed = TempManager.create_temp_file(suffix=v_path.suffix, prefix="temp_trim_")
+        try:
+            if progress_callback:
+                progress_callback(20.0, "Extracting trimmed video slice...")
+            FFmpegHelper.split_video_segment(
+                video_path=v_path,
+                output_path=temp_trimmed,
+                start_sec=start_sec,
+                duration_sec=duration,
+                stream_copy=True
+            )
+            cls.process_video_file(
+                video_path=temp_trimmed,
+                output_video_path=out_path,
+                config=config,
+                progress_callback=progress_callback
+            )
+            return out_path
+        finally:
+            TempManager.remove_file(temp_trimmed)
+
+    @classmethod
+    def split_video_by_duration(
+        cls,
+        video_path: Path | str,
+        segment_duration_sec: float,
+        output_dir: Path | str,
+        denoise: bool = False,
+        config: Optional[DenoiseConfig] = None,
+        progress_callback: Optional[Callable[[float, str], None]] = None
+    ) -> list[Path]:
+        """Splits video into equal duration chunks (e.g., 30s clips for YouTube Shorts, Reels, WhatsApp)."""
+        v_path = Path(video_path)
+        out_dir = Path(output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        total_duration = FFmpegHelper.get_media_duration(v_path)
+        if total_duration <= 0.0:
+            raise ValueError(f"Could not determine duration for video: {v_path.name}")
+
+        segment_duration_sec = max(0.5, segment_duration_sec)
+        num_segments = int(total_duration // segment_duration_sec)
+        if total_duration % segment_duration_sec > 0.1:
+            num_segments += 1
+
+        output_files: list[Path] = []
+        stem = v_path.stem
+        ext = v_path.suffix
+
+        for i in range(num_segments):
+            start = i * segment_duration_sec
+            dur = min(segment_duration_sec, total_duration - start)
+            if dur <= 0.1:
+                continue
+
+            part_name = f"{stem}_part{i+1:03d}{ext}"
+            part_path = out_dir / part_name
+
+            if progress_callback:
+                pct = (i / num_segments) * 100.0
+                progress_callback(pct, f"Processing split segment {i+1}/{num_segments}...")
+
+            cls.trim_video_range(
+                video_path=v_path,
+                start_sec=start,
+                end_sec=start + dur,
+                output_path=part_path,
+                denoise=denoise,
+                config=config
+            )
+            output_files.append(part_path)
+
+        if progress_callback:
+            progress_callback(100.0, f"Successfully created {len(output_files)} split video clips.")
+        return output_files
+
+    @classmethod
+    def split_video_by_parts(
+        cls,
+        video_path: Path | str,
+        num_parts: int,
+        output_dir: Path | str,
+        denoise: bool = False,
+        config: Optional[DenoiseConfig] = None,
+        progress_callback: Optional[Callable[[float, str], None]] = None
+    ) -> list[Path]:
+        """Splits video into N equal parts."""
+        v_path = Path(video_path)
+        total_duration = FFmpegHelper.get_media_duration(v_path)
+        if total_duration <= 0.0:
+            raise ValueError(f"Could not determine duration for video: {v_path.name}")
+
+        num_parts = max(2, min(50, num_parts))
+        seg_duration = total_duration / float(num_parts)
+        return cls.split_video_by_duration(
+            video_path=v_path,
+            segment_duration_sec=seg_duration,
+            output_dir=output_dir,
+            denoise=denoise,
+            config=config,
+            progress_callback=progress_callback
+        )

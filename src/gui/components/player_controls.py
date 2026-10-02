@@ -1,4 +1,4 @@
-"""Player controls widget providing audio playback, seeking, volume slider, and instant A/B switching."""
+"""Player controls widget providing audio playback, seeking, volume slider, and instant A/B/Delta switching."""
 import os
 import time
 import pygame
@@ -15,7 +15,7 @@ logger = get_logger("PlayerControls")
 
 
 class PlayerControls(ctk.CTkFrame):
-    """Interactive audio player bar with gapless A/B comparison switcher."""
+    """Interactive audio player bar with gapless A/B/Delta comparison switcher."""
 
     def __init__(
         self,
@@ -33,16 +33,17 @@ class PlayerControls(ctk.CTkFrame):
         )
         self.on_playhead_update = on_playhead_update
 
-        # Audio files for A/B comparison
+        # Audio files for A/B/Delta comparison
         self.orig_wav_path: Optional[Path] = None
         self.clean_wav_path: Optional[Path] = None
+        self.delta_wav_path: Optional[Path] = None
         self.duration_sec: float = 0.0
 
         # State
         self.is_playing: bool = False
         self.current_pos_sec: float = 0.0
         self.play_start_timestamp: float = 0.0
-        self.ab_mode: str = "B"  # 'A' = Original (Noisy), 'B' = Clean (Denoised)
+        self.ab_mode: str = "B"  # 'A' = Original (Noisy), 'B' = Clean (Denoised), 'D' = Delta (Noise Only)
         self.volume: float = 0.85
 
         # Initialize Pygame Mixer
@@ -90,7 +91,7 @@ class PlayerControls(ctk.CTkFrame):
         )
         self.stop_btn.grid(row=0, column=1, padx=4, pady=10)
 
-        # 3. Instant A/B Toggle Button
+        # 3. Instant A/B/Delta Toggle Button
         self.ab_btn = ctk.CTkButton(
             self,
             text="🔁 [B: CLEAN]",
@@ -99,7 +100,7 @@ class PlayerControls(ctk.CTkFrame):
             hover_color=Theme.ACCENT_CLEAN_HOVER,
             text_color="#FFFFFF",
             corner_radius=Theme.CORNER_RADIUS_SM,
-            width=130,
+            width=150,
             height=36,
             command=self.toggle_ab_mode
         )
@@ -180,16 +181,26 @@ class PlayerControls(ctk.CTkFrame):
         self.orig_wav_path = TempManager.create_temp_file(suffix=".wav", prefix="orig_play_")
         AudioIO.save_audio(orig_array, sample_rate, self.orig_wav_path)
 
-        # Save temporary WAV for clean if available
+        # Save temporary WAV for clean and noise delta
         if clean_array is not None:
             if self.clean_wav_path:
                 TempManager.remove_file(self.clean_wav_path)
             self.clean_wav_path = TempManager.create_temp_file(suffix=".wav", prefix="clean_play_")
             AudioIO.save_audio(clean_array, sample_rate, self.clean_wav_path)
+
+            # Compute difference noise track
+            min_len = min(orig_array.shape[-1], clean_array.shape[-1])
+            delta_arr = orig_array[..., :min_len] - clean_array[..., :min_len]
+            if self.delta_wav_path:
+                TempManager.remove_file(self.delta_wav_path)
+            self.delta_wav_path = TempManager.create_temp_file(suffix=".wav", prefix="delta_play_")
+            AudioIO.save_audio(delta_arr, sample_rate, self.delta_wav_path)
+
             self.ab_mode = "B"
             self._update_ab_button()
         else:
             self.clean_wav_path = None
+            self.delta_wav_path = None
             self.ab_mode = "A"
             self._update_ab_button()
 
@@ -203,7 +214,13 @@ class PlayerControls(ctk.CTkFrame):
             self.play()
 
     def play(self) -> None:
-        active_path = self.clean_wav_path if self.ab_mode == "B" and self.clean_wav_path else self.orig_wav_path
+        if self.ab_mode == "B" and self.clean_wav_path:
+            active_path = self.clean_wav_path
+        elif self.ab_mode == "D" and self.delta_wav_path:
+            active_path = self.delta_wav_path
+        else:
+            active_path = self.orig_wav_path
+
         if not active_path or not active_path.exists():
             return
 
@@ -247,23 +264,28 @@ class PlayerControls(ctk.CTkFrame):
         self.time_cur_label.configure(text=self._format_time(target_sec))
 
         if self.is_playing:
-            self.play()  # Restart at new position
+            self.play()
 
         if self.on_playhead_update:
             self.on_playhead_update(target_sec)
 
     def toggle_ab_mode(self) -> None:
-        """Instantly flips between Original (A) and Clean (B) sound without losing playback position."""
+        """Cycles gaplessly between Clean (B) -> Noise Only (Δ) -> Original (A)."""
         if not self.clean_wav_path:
             self.ab_mode = "A"
             self._update_ab_button()
             return
 
-        self.ab_mode = "A" if self.ab_mode == "B" else "B"
+        if self.ab_mode == "B":
+            self.ab_mode = "D"
+        elif self.ab_mode == "D":
+            self.ab_mode = "A"
+        else:
+            self.ab_mode = "B"
+
         self._update_ab_button()
 
         if self.is_playing:
-            # Seamless transition at current exact timestamp
             self.play()
 
     def _update_ab_button(self) -> None:
@@ -272,6 +294,12 @@ class PlayerControls(ctk.CTkFrame):
                 text="🔁 [B: CLEAN]",
                 fg_color=Theme.ACCENT_CLEAN,
                 hover_color=Theme.ACCENT_CLEAN_HOVER
+            )
+        elif self.ab_mode == "D" and self.delta_wav_path:
+            self.ab_btn.configure(
+                text="🔍 [Δ: NOISE ONLY]",
+                fg_color="#8B5CF6",
+                hover_color="#7C3AED"
             )
         else:
             self.ab_btn.configure(
@@ -293,7 +321,7 @@ class PlayerControls(ctk.CTkFrame):
             pass
 
     def _start_timer(self) -> None:
-        """Polls every 50ms to update scrubber and playhead position smoothly."""
+        """Polls every 40ms to update scrubber and playhead position smoothly."""
         if self.is_playing:
             cur = time.time() - self.play_start_timestamp
             if cur >= self.duration_sec:
