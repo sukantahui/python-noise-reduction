@@ -34,6 +34,7 @@ class BatchQueueView(ctk.CTkFrame):
         on_extract_audio_request: Optional[Callable[[], None]] = None,
         on_split_video_request: Optional[Callable[[], None]] = None,
         on_split_audio_request: Optional[Callable[[], None]] = None,
+        on_remove_selection_request: Optional[Callable[[], None]] = None,
         **kwargs
     ) -> None:
         super().__init__(
@@ -48,6 +49,7 @@ class BatchQueueView(ctk.CTkFrame):
         self.on_extract_audio_request = on_extract_audio_request
         self.on_split_video_request = on_split_video_request
         self.on_split_audio_request = on_split_audio_request
+        self.on_remove_selection_request = on_remove_selection_request
         self.output_dir: Path = Path.home() / "Desktop" / "Cleaned_Audio_Output"
 
         self._build_ui()
@@ -145,11 +147,24 @@ class BatchQueueView(ctk.CTkFrame):
             fg_color=Theme.CARD_BG_HOVER,
             hover_color=Theme.CARD_BORDER,
             text_color="#A78BFA",
-            width=110,
+            width=105,
             height=32,
             command=self._on_split_audio_tool_click
         )
         self.split_audio_tool_btn.grid(row=0, column=4, padx=2)
+
+        self.cut_selection_tool_btn = ctk.CTkButton(
+            self.opts_frame,
+            text="✂️ Cut Selection...",
+            font=Theme.FONT_SMALL,
+            fg_color=Theme.CARD_BG_HOVER,
+            hover_color=Theme.CARD_BORDER,
+            text_color=Theme.ACCENT_YELLOW,
+            width=115,
+            height=32,
+            command=self._on_cut_selection_tool_click
+        )
+        self.cut_selection_tool_btn.grid(row=0, column=5, padx=2)
 
         self.open_folder_btn = ctk.CTkButton(
             self.opts_frame,
@@ -157,11 +172,11 @@ class BatchQueueView(ctk.CTkFrame):
             font=Theme.FONT_SMALL,
             fg_color="#374151",
             hover_color="#4B5563",
-            width=110,
+            width=105,
             height=32,
             command=self.open_output_folder
         )
-        self.open_folder_btn.grid(row=0, column=5, padx=2)
+        self.open_folder_btn.grid(row=0, column=6, padx=2)
 
         self.export_btn = ctk.CTkButton(
             self.opts_frame,
@@ -171,11 +186,11 @@ class BatchQueueView(ctk.CTkFrame):
             hover_color=Theme.ACCENT_CLEAN_HOVER,
             text_color="#FFFFFF",
             corner_radius=Theme.CORNER_RADIUS_SM,
-            width=120,
+            width=115,
             height=34,
             command=self._on_export_click
         )
-        self.export_btn.grid(row=0, column=6, padx=(2, 0))
+        self.export_btn.grid(row=0, column=7, padx=(2, 0))
 
         # Row 2: Progress Bar and Status Label
         self.prog_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -219,6 +234,10 @@ class BatchQueueView(ctk.CTkFrame):
     def _on_split_audio_tool_click(self) -> None:
         if self.on_split_audio_request:
             self.on_split_audio_request()
+
+    def _on_cut_selection_tool_click(self) -> None:
+        if self.on_remove_selection_request:
+            self.on_remove_selection_request()
 
     def _on_export_click(self) -> None:
         out_dir = Path(self.dir_entry.get().strip())

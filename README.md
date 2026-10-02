@@ -28,6 +28,7 @@
 
 - 🎧 **Audio Noise Reduction**: Spectral gating & adaptive filtering for `.wav`, `.mp3`, `.flac`, `.aac`, `.m4a`, `.ogg`. Eliminates background hum, AC/fan noise, hiss, and ambient rumble.
 - 🎬 **Video Track Processing**: Drop any `.mp4`, `.mkv`, `.mov`, or `.avi` video. Automatically extracts audio, reduces noise, and remuxes cleaned audio back into the video in seconds using **FFmpeg Lossless Stream-Copy (`-c:v copy`)** — zero re-encoding and 100% video clarity preserved.
+- ✂️ **Audio & Video Selection Removal / Muter**: Precise time interval selection to either **Cut Out & Delete** unwanted sections (dead air, errors, profanity) with seamless audio micro-crossfading/video splice, or **Mute / Silence Audio** in the selection while keeping the video track intact.
 - ✂️ **Lossless Video Splitter & Trimmer**: Split videos into equal clips (15s, 30s for WhatsApp/Reels/Stories, 60s for Shorts, or custom parts) or custom `[Start - End]` time cuts with lossless stream-copy or simultaneous background audio denoising.
 - ✂️ **Audio Track Splitter & Silence Cutter**: Split audio files by fixed duration, into N equal parts, custom timestamp range cuts, or **automatic silence detection** (identifies pause intervals to separate voice takes/chapters) with optional instant AI denoising.
 - 🎵 **Direct Video Sound Extraction**: Dedicated tool & export modes to extract audio tracks from any video container into MP3 (320k), WAV (Lossless PCM), FLAC, AAC, or OGG — with options for raw untouched extraction or AI-denoised sound.

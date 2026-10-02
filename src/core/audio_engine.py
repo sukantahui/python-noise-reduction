@@ -502,3 +502,97 @@ class AudioDenoiseEngine:
         if progress_callback:
             progress_callback(100.0, f"Successfully split into {len(output_files)} audio takes.")
         return output_files
+
+    @classmethod
+    def remove_audio_selection(
+        cls,
+        audio_path: Path | str,
+        start_sec: float,
+        end_sec: float,
+        output_path: Path | str,
+        action: str = "cut",
+        crossfade_ms: float = 10.0,
+        denoise: bool = False,
+        config: Optional[DenoiseConfig] = None,
+        progress_callback: Optional[Callable[[float, str], None]] = None
+    ) -> Path:
+        """Removes or silences a selected time interval [start_sec, end_sec] from an audio track.
+
+        Args:
+            audio_path: Source audio file.
+            start_sec: Selection start in seconds.
+            end_sec: Selection end in seconds.
+            output_path: Destination audio file path.
+            action: 'cut' (delete selection & join remaining) or 'mute' (silence selected interval).
+            crossfade_ms: Duration in ms for micro-crossfade when splicing remaining parts.
+            denoise: If True, applies background noise reduction.
+            config: Denoise configuration.
+            progress_callback: Progress reporter (0-100%).
+
+        Returns:
+            Path to the saved audio file.
+        """
+        from src.utils.audio_io import AudioIO
+
+        a_path = Path(audio_path)
+        out_path = Path(output_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if progress_callback:
+            progress_callback(15.0, f"Loading audio track {a_path.name}...")
+
+        audio_arr, sr = AudioIO.load_audio(a_path)
+        total_samples = audio_arr.shape[-1]
+        start_idx = max(0, min(total_samples, int(start_sec * sr)))
+        end_idx = max(start_idx, min(total_samples, int(end_sec * sr)))
+
+        if progress_callback:
+            progress_callback(40.0, f"Processing selection removal ({start_sec:.2f}s - {end_sec:.2f}s)...")
+
+        if action == "mute":
+            # Silence / mute the selected range
+            result_arr = np.array(audio_arr, copy=True)
+            result_arr[..., start_idx:end_idx] = 0.0
+        else:
+            # Cut & splice remaining parts
+            if start_idx == 0 and end_idx >= total_samples:
+                # Removed everything -> 0.1s of silence
+                result_arr = np.zeros((audio_arr.shape[0], int(0.1 * sr)) if audio_arr.ndim > 1 else (int(0.1 * sr),), dtype=np.float32)
+            elif start_idx == 0:
+                result_arr = audio_arr[..., end_idx:]
+            elif end_idx >= total_samples:
+                result_arr = audio_arr[..., :start_idx]
+            else:
+                fade_samples = min(int(crossfade_ms * sr / 1000.0), start_idx, total_samples - end_idx)
+                if fade_samples > 2:
+                    fade_out = np.linspace(1.0, 0.0, fade_samples, dtype=np.float32)
+                    fade_in = np.linspace(0.0, 1.0, fade_samples, dtype=np.float32)
+                    if audio_arr.ndim > 1:
+                        fade_out = fade_out[np.newaxis, :]
+                        fade_in = fade_in[np.newaxis, :]
+
+                    tail = audio_arr[..., start_idx - fade_samples : start_idx] * fade_out
+                    head = audio_arr[..., end_idx : end_idx + fade_samples] * fade_in
+                    blended = tail + head
+
+                    part_a = audio_arr[..., : start_idx - fade_samples]
+                    part_b = audio_arr[..., end_idx + fade_samples :]
+                    result_arr = np.concatenate([part_a, blended, part_b], axis=-1)
+                else:
+                    part_a = audio_arr[..., :start_idx]
+                    part_b = audio_arr[..., end_idx:]
+                    result_arr = np.concatenate([part_a, part_b], axis=-1)
+
+        if denoise:
+            if progress_callback:
+                progress_callback(70.0, "Applying noise reduction to spliced audio...")
+            result_arr = cls.process_audio(result_arr, sample_rate=sr, config=config)
+
+        if progress_callback:
+            progress_callback(90.0, f"Saving processed audio to {out_path.name}...")
+
+        AudioIO.save_audio(result_arr, sample_rate=sr, output_path=out_path)
+
+        if progress_callback:
+            progress_callback(100.0, f"Successfully saved: {out_path.name}")
+        return out_path

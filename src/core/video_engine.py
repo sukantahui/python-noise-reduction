@@ -381,3 +381,176 @@ class VideoEngine:
             config=config,
             progress_callback=progress_callback
         )
+
+    @classmethod
+    def remove_video_selection(
+        cls,
+        video_path: Path | str,
+        start_sec: float,
+        end_sec: float,
+        output_path: Path | str,
+        action: str = "cut",
+        denoise: bool = False,
+        config: Optional[DenoiseConfig] = None,
+        progress_callback: Optional[Callable[[float, str], None]] = None
+    ) -> Path:
+        """Removes or silences a selected time interval [start_sec, end_sec] from a video file.
+
+        Args:
+            video_path: Source video file path.
+            start_sec: Selection start time in seconds.
+            end_sec: Selection end time in seconds.
+            output_path: Destination video path.
+            action: 'cut' (delete selection & join remaining parts) or 'mute_audio' (silence audio only).
+            denoise: If True, applies AI background noise reduction to remaining audio.
+            config: Denoise configuration.
+            progress_callback: Progress reporter (0-100%).
+
+        Returns:
+            Path to the saved processed video file.
+        """
+        v_path = Path(video_path)
+        out_path = Path(output_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        total_duration = FFmpegHelper.get_media_duration(v_path)
+        if total_duration <= 0.0:
+            raise ValueError(f"Could not determine video duration for: {v_path.name}")
+
+        start_sec = max(0.0, min(total_duration, start_sec))
+        end_sec = max(start_sec, min(total_duration, end_sec))
+
+        if action == "mute_audio":
+            # Action: Mute audio in selected range while preserving video frames 100%
+            temp_extracted = TempManager.create_temp_file(suffix=".wav", prefix="temp_ext_")
+            temp_muted = TempManager.create_temp_file(suffix=".wav", prefix="temp_muted_")
+            try:
+                if progress_callback:
+                    progress_callback(20.0, "Extracting video audio stream...")
+                cls.extract_audio(v_path, output_audio_path=temp_extracted, sample_rate=48000)
+
+                if progress_callback:
+                    progress_callback(50.0, f"Muting selected region ({start_sec:.1f}s - {end_sec:.1f}s)...")
+                AudioDenoiseEngine.remove_audio_selection(
+                    audio_path=temp_extracted,
+                    start_sec=start_sec,
+                    end_sec=end_sec,
+                    output_path=temp_muted,
+                    action="mute",
+                    denoise=denoise,
+                    config=config
+                )
+
+                if progress_callback:
+                    progress_callback(85.0, "Remuxing video with muted audio track...")
+                cls.remux_audio(
+                    original_video_path=v_path,
+                    cleaned_audio_path=temp_muted,
+                    output_video_path=out_path,
+                    audio_codec="aac",
+                    audio_bitrate="320k"
+                )
+                if progress_callback:
+                    progress_callback(100.0, f"Successfully muted selection in: {out_path.name}")
+                return out_path
+            finally:
+                TempManager.remove_file(temp_extracted)
+                TempManager.remove_file(temp_muted)
+
+        # Action: Cut and delete selected range, splicing remaining parts together
+        if start_sec <= 0.05 and end_sec >= total_duration - 0.05:
+            raise ValueError("Cannot remove the entire video duration.")
+
+        if start_sec <= 0.05:
+            # Slicing from end_sec to total_duration
+            return cls.trim_video_range(
+                video_path=v_path,
+                start_sec=end_sec,
+                end_sec=total_duration,
+                output_path=out_path,
+                denoise=denoise,
+                config=config,
+                progress_callback=progress_callback
+            )
+
+        if end_sec >= total_duration - 0.05:
+            # Slicing from 0.0 to start_sec
+            return cls.trim_video_range(
+                video_path=v_path,
+                start_sec=0.0,
+                end_sec=start_sec,
+                output_path=out_path,
+                denoise=denoise,
+                config=config,
+                progress_callback=progress_callback
+            )
+
+        # Middle cut: Single-pass frame-accurate video and audio cut with filter_complex
+        import subprocess
+        import sys
+        ffmpeg_bin = FFmpegHelper.get_ffmpeg_path()
+        filter_expr = (
+            f"[0:v]trim=start=0:end={start_sec:.3f},setpts=PTS-STARTPTS[v0];"
+            f"[0:a]atrim=start=0:end={start_sec:.3f},asetpts=PTS-STARTPTS[a0];"
+            f"[0:v]trim=start={end_sec:.3f}:end={total_duration:.3f},setpts=PTS-STARTPTS[v1];"
+            f"[0:a]atrim=start={end_sec:.3f}:end={total_duration:.3f},asetpts=PTS-STARTPTS[a1];"
+            f"[v0][a0][v1][a1]concat=n=2:v=1:a=1[outv][outa]"
+        )
+
+        if not denoise:
+            if progress_callback:
+                progress_callback(30.0, f"Cutting out selection ({start_sec:.1f}s - {end_sec:.1f}s)...")
+            cmd = [
+                ffmpeg_bin, "-y",
+                "-i", str(v_path),
+                "-filter_complex", filter_expr,
+                "-map", "[outv]",
+                "-map", "[outa]",
+                "-c:v", "libx264",
+                "-c:a", "aac",
+                "-b:a", "320k",
+                str(out_path)
+            ]
+            subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                check=True
+            )
+            if progress_callback:
+                progress_callback(100.0, f"Successfully removed selection: {out_path.name}")
+            return out_path
+        else:
+            temp_cut = TempManager.create_temp_file(suffix=v_path.suffix, prefix="temp_cut_")
+            try:
+                if progress_callback:
+                    progress_callback(30.0, f"Cutting video slice ({start_sec:.1f}s - {end_sec:.1f}s)...")
+                cmd = [
+                    ffmpeg_bin, "-y",
+                    "-i", str(v_path),
+                    "-filter_complex", filter_expr,
+                    "-map", "[outv]",
+                    "-map", "[outa]",
+                    "-c:v", "libx264",
+                    "-c:a", "aac",
+                    "-b:a", "320k",
+                    str(temp_cut)
+                ]
+                subprocess.run(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                    check=True
+                )
+                cls.process_video_file(
+                    video_path=temp_cut,
+                    output_video_path=out_path,
+                    config=config,
+                    progress_callback=progress_callback
+                )
+                return out_path
+            finally:
+                TempManager.remove_file(temp_cut)
+

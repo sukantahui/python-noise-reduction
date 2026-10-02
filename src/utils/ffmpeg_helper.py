@@ -323,3 +323,98 @@ class FFmpegHelper:
         except subprocess.CalledProcessError as ex:
             logger.error(f"FFmpeg video remux failed: {ex.stderr.decode('utf-8', errors='ignore')}")
             raise RuntimeError(f"FFmpeg video remux failed: {ex}")
+
+    @classmethod
+    def concat_video_segments(
+        cls,
+        segment_paths: list[Path | str],
+        output_path: Path | str,
+        stream_copy: bool = True
+    ) -> bool:
+        """Concatenates multiple video segments into a single video file seamlessly.
+
+        Args:
+            segment_paths: List of file paths for the segments to join.
+            output_path: Target destination path.
+            stream_copy: If True, uses fast lossless demuxer stream copy.
+        """
+        if not segment_paths:
+            raise ValueError("No video segments provided to concatenate.")
+
+        dest = Path(output_path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        ffmpeg_bin = cls.get_ffmpeg_path()
+
+        if len(segment_paths) == 1:
+            shutil.copyfile(str(segment_paths[0]), str(dest))
+            return dest.exists()
+
+        # Method 1: Concat Demuxer (Lossless & Near Instant)
+        from src.utils.temp_manager import TempManager
+        concat_txt = TempManager.create_temp_file(suffix=".txt", prefix="concat_list_")
+        try:
+            with open(concat_txt, "w", encoding="utf-8") as f:
+                for seg in segment_paths:
+                    escaped = str(Path(seg).resolve()).replace("\\", "/")
+                    f.write(f"file '{escaped}'\n")
+
+            cmd = [
+                ffmpeg_bin,
+                "-y",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", str(concat_txt),
+            ]
+            if stream_copy:
+                cmd.extend(["-c", "copy"])
+            else:
+                cmd.extend(["-c:v", "libx264", "-c:a", "aac", "-b:a", "320k"])
+
+            cmd.append(str(dest))
+            logger.info(f"Concatenating video segments: {' '.join(cmd)}")
+
+            res = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            )
+            if res.returncode == 0 and dest.exists() and dest.stat().st_size > 0:
+                return True
+
+            logger.warning("Concat demuxer failed or produced empty file; falling back to filter_complex concat...")
+        finally:
+            TempManager.remove_file(concat_txt)
+
+        # Method 2 Fallback: filter_complex concat
+        cmd_filter = [ffmpeg_bin, "-y"]
+        filter_inputs = ""
+        for i, seg in enumerate(segment_paths):
+            cmd_filter.extend(["-i", str(seg)])
+            filter_inputs += f"[{i}:v][{i}:a]"
+
+        filter_expr = f"{filter_inputs}concat=n={len(segment_paths)}:v=1:a=1[v][a]"
+        cmd_filter.extend([
+            "-filter_complex", filter_expr,
+            "-map", "[v]",
+            "-map", "[a]",
+            "-c:v", "libx264",
+            "-c:a", "aac",
+            "-b:a", "320k",
+            str(dest)
+        ])
+
+        try:
+            subprocess.run(
+                cmd_filter,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                check=True
+            )
+            return dest.exists() and dest.stat().st_size > 0
+        except subprocess.CalledProcessError as ex:
+            err = ex.stderr.decode("utf-8", errors="ignore")
+            logger.error(f"Fallback filter_complex concat failed: {err}")
+            raise RuntimeError(f"Failed to concatenate video segments: {err.strip().splitlines()[-1] if err else str(ex)}")
+

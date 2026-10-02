@@ -160,3 +160,49 @@ def test_split_audio_by_silence(tmp_path, sample_rate):
     for take in takes:
         assert take.exists()
 
+
+def test_remove_audio_selection_cut(tmp_path, synthetic_clean_audio, sample_rate):
+    """Verifies that remove_audio_selection with action='cut' deletes the region and joins remainder."""
+    from src.utils.audio_io import AudioIO
+    wav_path = tmp_path / "audio_cut_test.wav"
+    out_path = tmp_path / "audio_cut_result.wav"
+    AudioIO.save_audio(synthetic_clean_audio, sample_rate, wav_path)  # 2.0s
+
+    # Cut out 0.5s to 1.5s (1.0s removed -> remaining ~1.0s)
+    res = AudioDenoiseEngine.remove_audio_selection(
+        audio_path=wav_path,
+        start_sec=0.5,
+        end_sec=1.5,
+        output_path=out_path,
+        action="cut"
+    )
+    assert res.exists()
+    arr, sr = AudioIO.load_audio(res)
+    duration = arr.shape[-1] / float(sr)
+    assert 0.95 <= duration <= 1.05
+
+
+def test_remove_audio_selection_mute(tmp_path, synthetic_clean_audio, sample_rate):
+    """Verifies that remove_audio_selection with action='mute' zeroes out the specified interval."""
+    from src.utils.audio_io import AudioIO
+    wav_path = tmp_path / "audio_mute_test.wav"
+    out_path = tmp_path / "audio_mute_result.wav"
+    AudioIO.save_audio(synthetic_clean_audio, sample_rate, wav_path)  # 2.0s
+
+    res = AudioDenoiseEngine.remove_audio_selection(
+        audio_path=wav_path,
+        start_sec=0.5,
+        end_sec=1.5,
+        output_path=out_path,
+        action="mute"
+    )
+    assert res.exists()
+    arr, sr = AudioIO.load_audio(res)
+    # Total duration unchanged
+    duration = arr.shape[-1] / float(sr)
+    assert 1.95 <= duration <= 2.05
+    # Region between 0.6s and 1.4s must be silent (power ~ 0)
+    mid_chunk = arr[int(0.6 * sr) : int(1.4 * sr)]
+    assert np.max(np.abs(mid_chunk)) < 1e-6
+
+

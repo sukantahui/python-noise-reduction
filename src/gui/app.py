@@ -19,6 +19,7 @@ from src.gui.components.about_dialog import AboutDialog
 from src.gui.components.extract_dialog import ExtractAudioDialog
 from src.gui.components.video_splitter_dialog import VideoSplitterDialog
 from src.gui.components.audio_splitter_dialog import AudioSplitterDialog
+from src.gui.components.selection_removal_dialog import SelectionRemovalDialog
 
 from src.core.audio_engine import AudioDenoiseEngine, DenoiseConfig
 from src.core.video_engine import VideoEngine
@@ -189,7 +190,8 @@ class NoiseReliefApp(ctk.CTk):
             on_file_selected=self._on_media_loaded,
             on_extract_audio=self._open_extract_dialog,
             on_split_video=self._open_video_splitter_dialog,
-            on_split_audio=self._open_audio_splitter_dialog
+            on_split_audio=self._open_audio_splitter_dialog,
+            on_remove_selection=self._open_selection_removal_dialog
         )
         self.drop_zone.grid(row=0, column=0, sticky="ew", pady=(0, 8))
 
@@ -225,7 +227,8 @@ class NoiseReliefApp(ctk.CTk):
             on_export_start=self._on_export_requested,
             on_extract_audio_request=lambda: self._open_extract_dialog(self.current_media_path),
             on_split_video_request=lambda: self._open_video_splitter_dialog(self.current_media_path),
-            on_split_audio_request=lambda: self._open_audio_splitter_dialog(self.current_media_path)
+            on_split_audio_request=lambda: self._open_audio_splitter_dialog(self.current_media_path),
+            on_remove_selection_request=lambda: self._open_selection_removal_dialog(self.current_media_path)
         )
         self.export_view.grid(row=2, column=0, columnspan=2, sticky="ew", padx=16, pady=(6, 14))
 
@@ -458,6 +461,17 @@ class NoiseReliefApp(ctk.CTk):
             default_audio_path=target_audio,
             denoise_config=config,
             on_success=lambda files: self.export_view.update_progress(100.0, f"Split into {len(files)} audio tracks")
+        )
+
+    def _open_selection_removal_dialog(self, target_media_path: Optional[Path] = None) -> None:
+        """Opens the Audio & Video Selection Removal / Muter modal dialog."""
+        target_media = target_media_path or self.current_media_path
+        config = self.settings_panel.get_config()
+        SelectionRemovalDialog(
+            parent=self,
+            default_media_path=target_media,
+            denoise_config=config,
+            on_success=lambda out_file: self.export_view.update_progress(100.0, f"Saved: {out_file.name}")
         )
 
     def _open_about_dialog(self) -> None:

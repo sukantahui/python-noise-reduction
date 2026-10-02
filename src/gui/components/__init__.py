@@ -8,6 +8,7 @@ from .about_dialog import AboutDialog
 from .extract_dialog import ExtractAudioDialog
 from .video_splitter_dialog import VideoSplitterDialog
 from .audio_splitter_dialog import AudioSplitterDialog
+from .selection_removal_dialog import SelectionRemovalDialog
 
 __all__ = [
     "DropZone",
@@ -18,5 +19,7 @@ __all__ = [
     "AboutDialog",
     "ExtractAudioDialog",
     "VideoSplitterDialog",
-    "AudioSplitterDialog"
+    "AudioSplitterDialog",
+    "SelectionRemovalDialog"
 ]
+

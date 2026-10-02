@@ -148,3 +148,41 @@ def test_video_extract_sound_denoised(synthetic_video_file, tmp_path):
     data, sr = sf.read(str(res))
     assert sr == 48000
     assert len(data) > 0
+
+
+def test_remove_video_selection_cut(synthetic_video_file, tmp_path):
+    """Verifies cutting out a middle segment from a video and joining the rest."""
+    out_video = tmp_path / "cut_video.mp4"
+    res = VideoEngine.remove_video_selection(
+        video_path=synthetic_video_file,
+        start_sec=0.5,
+        end_sec=1.5,
+        output_path=out_video,
+        action="cut",
+        denoise=False
+    )
+    assert res.exists()
+    assert res.stat().st_size > 0
+    duration = FFmpegHelper.get_media_duration(res)
+    # 3.0s total with 1.0s cut -> ~2.0s
+    assert 1.8 <= duration <= 2.2
+
+
+def test_remove_video_selection_mute_audio(synthetic_video_file, tmp_path):
+    """Verifies muting audio in a specific range of a video file."""
+    out_video = tmp_path / "muted_video.mp4"
+    res = VideoEngine.remove_video_selection(
+        video_path=synthetic_video_file,
+        start_sec=0.5,
+        end_sec=1.5,
+        output_path=out_video,
+        action="mute_audio",
+        denoise=False
+    )
+    assert res.exists()
+    assert res.stat().st_size > 0
+    duration = FFmpegHelper.get_media_duration(res)
+    # Duration unchanged at ~3.0s
+    assert 2.8 <= duration <= 3.2
+
+
