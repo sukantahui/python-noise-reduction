@@ -20,10 +20,12 @@ from src.gui.components.extract_dialog import ExtractAudioDialog
 from src.gui.components.video_splitter_dialog import VideoSplitterDialog
 from src.gui.components.audio_splitter_dialog import AudioSplitterDialog
 from src.gui.components.selection_removal_dialog import SelectionRemovalDialog
+from src.gui.components.vocal_extractor_dialog import VocalExtractorDialog
 
 from src.core.audio_engine import AudioDenoiseEngine, DenoiseConfig
 from src.core.video_engine import VideoEngine
 from src.core.audio_analyzer import AudioAnalyzer
+from src.core.vocal_extractor import VocalExtractor, VocalExtractionConfig
 from src.utils.audio_io import AudioIO
 from src.utils.ffmpeg_helper import FFmpegHelper
 from src.utils.temp_manager import TempManager
@@ -191,7 +193,8 @@ class NoiseReliefApp(ctk.CTk):
             on_extract_audio=self._open_extract_dialog,
             on_split_video=self._open_video_splitter_dialog,
             on_split_audio=self._open_audio_splitter_dialog,
-            on_remove_selection=self._open_selection_removal_dialog
+            on_remove_selection=self._open_selection_removal_dialog,
+            on_extract_vocals=self._open_vocal_extractor_dialog
         )
         self.drop_zone.grid(row=0, column=0, sticky="ew", pady=(0, 8))
 
@@ -228,7 +231,8 @@ class NoiseReliefApp(ctk.CTk):
             on_extract_audio_request=lambda: self._open_extract_dialog(self.current_media_path),
             on_split_video_request=lambda: self._open_video_splitter_dialog(self.current_media_path),
             on_split_audio_request=lambda: self._open_audio_splitter_dialog(self.current_media_path),
-            on_remove_selection_request=lambda: self._open_selection_removal_dialog(self.current_media_path)
+            on_remove_selection_request=lambda: self._open_selection_removal_dialog(self.current_media_path),
+            on_extract_vocals_request=lambda: self._open_vocal_extractor_dialog(self.current_media_path)
         )
         self.export_view.grid(row=2, column=0, columnspan=2, sticky="ew", padx=16, pady=(6, 14))
 
@@ -378,6 +382,26 @@ class NoiseReliefApp(ctk.CTk):
                     else:
                         AudioIO.save_audio(self.current_raw_audio, self.sample_rate, out_path)
                     _progress_cb(100.0, f"Exported: {out_path.name}")
+                elif "Isolated Vocals" in video_mode:
+                    # Extract Isolated Vocals (Acapella)
+                    out_audio_name = f"{stem}_vocals.wav"
+                    out_path = output_dir / out_audio_name
+                    VocalExtractor.extract_vocal_file(
+                        input_media_path=src_path,
+                        output_vocal_path=out_path,
+                        progress_callback=_progress_cb
+                    )
+                    _progress_cb(100.0, f"Exported Isolated Vocals: {out_path.name}")
+                elif "Karaoke Track" in video_mode:
+                    # Extract Instrumental / Karaoke
+                    out_audio_name = f"{stem}_instrumental.wav"
+                    out_path = output_dir / out_audio_name
+                    VocalExtractor.extract_vocal_file(
+                        input_media_path=src_path,
+                        output_instrumental_path=out_path,
+                        progress_callback=_progress_cb
+                    )
+                    _progress_cb(100.0, f"Exported Instrumental Track: {out_path.name}")
                 elif "Noise Track Only" in video_mode:
                     # Export isolated noise profile (Delta)
                     if self.current_clean_audio is None:
@@ -472,6 +496,15 @@ class NoiseReliefApp(ctk.CTk):
             default_media_path=target_media,
             denoise_config=config,
             on_success=lambda out_file: self.export_view.update_progress(100.0, f"Saved: {out_file.name}")
+        )
+
+    def _open_vocal_extractor_dialog(self, target_media_path: Optional[Path] = None) -> None:
+        """Opens the Vocal & Music Separator modal dialog."""
+        target_media = target_media_path or self.current_media_path
+        VocalExtractorDialog(
+            parent=self,
+            default_media_path=target_media,
+            on_success=lambda files: self.export_view.update_progress(100.0, f"Separated {len(files)} track(s)")
         )
 
     def _open_about_dialog(self) -> None:

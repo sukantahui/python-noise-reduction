@@ -22,6 +22,8 @@ class BatchQueueView(ctk.CTkFrame):
         "Cleaned Audio (FLAC Studio)",
         "Cleaned Audio (AAC / M4A)",
         "Cleaned Audio (OGG Vorbis)",
+        "Isolated Vocals (Acapella WAV)",
+        "Karaoke Track (Instrumental WAV)",
         "Noise Track Only (Difference WAV)",
         "Raw Original Audio (WAV)",
         "Raw Original Audio (MP3 320k)",
@@ -35,6 +37,7 @@ class BatchQueueView(ctk.CTkFrame):
         on_split_video_request: Optional[Callable[[], None]] = None,
         on_split_audio_request: Optional[Callable[[], None]] = None,
         on_remove_selection_request: Optional[Callable[[], None]] = None,
+        on_extract_vocals_request: Optional[Callable[[], None]] = None,
         **kwargs
     ) -> None:
         super().__init__(
@@ -50,6 +53,7 @@ class BatchQueueView(ctk.CTkFrame):
         self.on_split_video_request = on_split_video_request
         self.on_split_audio_request = on_split_audio_request
         self.on_remove_selection_request = on_remove_selection_request
+        self.on_extract_vocals_request = on_extract_vocals_request
         self.output_dir: Path = Path.home() / "Desktop" / "Cleaned_Audio_Output"
 
         self._build_ui()
@@ -166,6 +170,19 @@ class BatchQueueView(ctk.CTkFrame):
         )
         self.cut_selection_tool_btn.grid(row=0, column=5, padx=2)
 
+        self.extract_vocals_tool_btn = ctk.CTkButton(
+            self.opts_frame,
+            text="🎤 Vocals...",
+            font=Theme.FONT_SMALL,
+            fg_color=Theme.CARD_BG_HOVER,
+            hover_color=Theme.CARD_BORDER,
+            text_color="#F472B6",
+            width=95,
+            height=32,
+            command=self._on_extract_vocals_tool_click
+        )
+        self.extract_vocals_tool_btn.grid(row=0, column=6, padx=2)
+
         self.open_folder_btn = ctk.CTkButton(
             self.opts_frame,
             text="📂 Output Folder",
@@ -176,7 +193,7 @@ class BatchQueueView(ctk.CTkFrame):
             height=32,
             command=self.open_output_folder
         )
-        self.open_folder_btn.grid(row=0, column=6, padx=2)
+        self.open_folder_btn.grid(row=0, column=7, padx=2)
 
         self.export_btn = ctk.CTkButton(
             self.opts_frame,
@@ -190,7 +207,7 @@ class BatchQueueView(ctk.CTkFrame):
             height=34,
             command=self._on_export_click
         )
-        self.export_btn.grid(row=0, column=7, padx=(2, 0))
+        self.export_btn.grid(row=0, column=8, padx=(2, 0))
 
         # Row 2: Progress Bar and Status Label
         self.prog_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -238,6 +255,10 @@ class BatchQueueView(ctk.CTkFrame):
     def _on_cut_selection_tool_click(self) -> None:
         if self.on_remove_selection_request:
             self.on_remove_selection_request()
+
+    def _on_extract_vocals_tool_click(self) -> None:
+        if self.on_extract_vocals_request:
+            self.on_extract_vocals_request()
 
     def _on_export_click(self) -> None:
         out_dir = Path(self.dir_entry.get().strip())

@@ -26,6 +26,7 @@
 
 ## 🌟 Key Features
 
+- 🎤 **Vocal Isolation & Instrumental Separation (Acapella / Karaoke)**: Separate vocals from music tracks using center-channel phase-coherence extraction, spectral masking, and speech formant enhancement. Export pure **Acapella vocals**, **Karaoke backing tracks**, or both simultaneously to WAV, MP3, FLAC, AAC, or OGG.
 - 🎧 **Audio Noise Reduction**: Spectral gating & adaptive filtering for `.wav`, `.mp3`, `.flac`, `.aac`, `.m4a`, `.ogg`. Eliminates background hum, AC/fan noise, hiss, and ambient rumble.
 - 🎬 **Video Track Processing**: Drop any `.mp4`, `.mkv`, `.mov`, or `.avi` video. Automatically extracts audio, reduces noise, and remuxes cleaned audio back into the video in seconds using **FFmpeg Lossless Stream-Copy (`-c:v copy`)** — zero re-encoding and 100% video clarity preserved.
 - ✂️ **Audio & Video Selection Removal / Muter**: Precise time interval selection to either **Cut Out & Delete** unwanted sections (dead air, errors, profanity) with seamless audio micro-crossfading/video splice, or **Mute / Silence Audio** in the selection while keeping the video track intact.
