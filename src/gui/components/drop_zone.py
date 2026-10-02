@@ -1,0 +1,187 @@
+"""Drag-and-drop media import widget with file picker and format badge display."""
+import customtkinter as ctk
+from pathlib import Path
+from typing import Callable, Optional
+from tkinter import filedialog
+from src.gui.theme import Theme
+from src.utils.ffmpeg_helper import FFmpegHelper
+
+
+class DropZone(ctk.CTkFrame):
+    """Media dropzone and file selection card."""
+
+    SUPPORTED_EXTENSIONS = (
+        ("Media Files", "*.wav *.mp3 *.flac *.aac *.m4a *.ogg *.mp4 *.mkv *.mov *.avi *.webm"),
+        ("Audio Files", "*.wav *.mp3 *.flac *.aac *.m4a *.ogg"),
+        ("Video Files", "*.mp4 *.mkv *.mov *.avi *.webm"),
+        ("All Files", "*.*")
+    )
+
+    def __init__(
+        self,
+        master: any,
+        on_file_selected: Callable[[Path], None],
+        on_extract_audio: Optional[Callable[[Optional[Path]], None]] = None,
+        **kwargs
+    ) -> None:
+        super().__init__(
+            master,
+            fg_color=Theme.CARD_BG,
+            border_color=Theme.CARD_BORDER,
+            border_width=1,
+            corner_radius=Theme.CORNER_RADIUS_MD,
+            **kwargs
+        )
+        self.on_file_selected = on_file_selected
+        self.on_extract_audio = on_extract_audio
+        self.current_file: Optional[Path] = None
+
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        self.grid_columnconfigure(0, weight=1)
+
+        # Container Frame
+        self.inner_frame = ctk.CTkFrame(
+            self,
+            fg_color="transparent",
+            corner_radius=Theme.CORNER_RADIUS_MD
+        )
+        self.inner_frame.pack(fill="both", expand=True, padx=16, pady=16)
+
+        # Title & Icon
+        self.icon_label = ctk.CTkLabel(
+            self.inner_frame,
+            text="📁  Drag & Drop Media File Here",
+            font=Theme.FONT_TITLE,
+            text_color=Theme.TEXT_PRIMARY
+        )
+        self.icon_label.pack(pady=(4, 6))
+
+        # Subtitle formats
+        self.sub_label = ctk.CTkLabel(
+            self.inner_frame,
+            text="Supports Video (MP4, MKV, MOV, AVI) & Audio (WAV, MP3, FLAC, M4A, OGG)",
+            font=Theme.FONT_SMALL,
+            text_color=Theme.TEXT_SECONDARY
+        )
+        self.sub_label.pack(pady=(0, 12))
+
+        # Buttons row
+        self.btn_row = ctk.CTkFrame(self.inner_frame, fg_color="transparent")
+        self.btn_row.pack(pady=4)
+
+        self.browse_btn = ctk.CTkButton(
+            self.btn_row,
+            text="Browse Media File...",
+            font=Theme.FONT_BODY,
+            fg_color=Theme.ACCENT_CYAN,
+            hover_color=Theme.ACCENT_CYAN_HOVER,
+            text_color="#FFFFFF",
+            corner_radius=Theme.CORNER_RADIUS_SM,
+            command=self._on_browse_click,
+            height=34,
+            width=160
+        )
+        self.browse_btn.pack(side="left", padx=6)
+
+        self.extract_audio_btn = ctk.CTkButton(
+            self.btn_row,
+            text="🎵 Extract Sound from Video...",
+            font=Theme.FONT_BODY,
+            fg_color="#374151",
+            hover_color="#4B5563",
+            text_color=Theme.TEXT_PRIMARY,
+            corner_radius=Theme.CORNER_RADIUS_SM,
+            command=self._on_extract_audio_click,
+            height=34,
+            width=190
+        )
+        self.extract_audio_btn.pack(side="left", padx=6)
+
+        # Loaded File Metadata Badge Frame (Hidden initially)
+        self.info_card = ctk.CTkFrame(
+            self.inner_frame,
+            fg_color=Theme.BG_DARK,
+            corner_radius=Theme.CORNER_RADIUS_SM,
+            border_color=Theme.CARD_BORDER,
+            border_width=1
+        )
+        self.info_card.grid_columnconfigure(0, weight=1)
+
+        self.card_left = ctk.CTkFrame(self.info_card, fg_color="transparent")
+        self.card_left.pack(side="left", fill="both", expand=True, padx=12, pady=6)
+
+        self.file_title_label = ctk.CTkLabel(
+            self.card_left,
+            text="",
+            font=Theme.FONT_SUBTITLE,
+            text_color=Theme.ACCENT_CLEAN,
+            anchor="w"
+        )
+        self.file_title_label.pack(anchor="w", pady=(0, 2))
+
+        self.file_meta_label = ctk.CTkLabel(
+            self.card_left,
+            text="",
+            font=Theme.FONT_SMALL,
+            text_color=Theme.TEXT_SECONDARY,
+            anchor="w"
+        )
+        self.file_meta_label.pack(anchor="w")
+
+        # Quick Extract Audio Chip for Loaded Videos
+        self.quick_extract_btn = ctk.CTkButton(
+            self.info_card,
+            text="🎵 Extract Audio",
+            font=Theme.FONT_SMALL,
+            fg_color=Theme.CARD_BG_HOVER,
+            hover_color=Theme.CARD_BORDER,
+            text_color=Theme.ACCENT_CYAN,
+            width=110,
+            height=28,
+            corner_radius=Theme.CORNER_RADIUS_SM,
+            command=self._on_extract_audio_click
+        )
+
+    def _on_browse_click(self) -> None:
+        file_path_str = filedialog.askopenfilename(
+            title="Select Audio or Video File",
+            filetypes=self.SUPPORTED_EXTENSIONS
+        )
+        if file_path_str:
+            path = Path(file_path_str)
+            self.set_loaded_file(path)
+            self.on_file_selected(path)
+
+    def _on_extract_audio_click(self) -> None:
+        if self.on_extract_audio:
+            self.on_extract_audio(self.current_file)
+
+    def set_loaded_file(self, path: Path, metadata_str: str = "") -> None:
+        """Updates UI display with loaded file information."""
+        self.current_file = path
+        is_video = FFmpegHelper.is_video_file(path)
+        tag = "[VIDEO TRACK]" if is_video else "[AUDIO TRACK]"
+
+        self.file_title_label.configure(text=f"{tag} {path.name}")
+        size_mb = path.stat().st_size / (1024 * 1024) if path.exists() else 0.0
+
+        if not metadata_str:
+            meta = f"Size: {size_mb:.2f} MB | Format: {path.suffix.upper().lstrip('.')}"
+        else:
+            meta = f"{metadata_str} | Size: {size_mb:.2f} MB"
+
+        self.file_meta_label.configure(text=meta)
+
+        if is_video:
+            self.quick_extract_btn.pack(side="right", padx=12, pady=6)
+        else:
+            self.quick_extract_btn.pack_forget()
+
+        self.info_card.pack(fill="x", expand=True, pady=(10, 0))
+
+    def clear(self) -> None:
+        """Clears loaded file card."""
+        self.current_file = None
+        self.info_card.pack_forget()
