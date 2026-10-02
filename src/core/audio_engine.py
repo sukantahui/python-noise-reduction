@@ -1,6 +1,7 @@
 """Core Audio Denoising Engine implementing spectral gating, adaptive filtering, noise profiling, and DSP processing."""
 import numpy as np
 import noisereduce as nr
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional, Callable, Dict, Any, Tuple
 from .filter_pipeline import FilterPipeline
@@ -281,3 +282,223 @@ class AudioDenoiseEngine:
             progress_callback(100.0, "Denoising complete.")
 
         return denoised.astype(np.float32)
+
+    @classmethod
+    def trim_audio_range(
+        cls,
+        audio_path: Path | str,
+        start_sec: float,
+        end_sec: float,
+        output_path: Path | str,
+        denoise: bool = False,
+        config: Optional[DenoiseConfig] = None,
+        progress_callback: Optional[Callable[[float, str], None]] = None
+    ) -> Path:
+        """Extracts and saves a time slice [start_sec, end_sec] from an audio track with optional denoising."""
+        from src.utils.audio_io import AudioIO
+
+        a_path = Path(audio_path)
+        out_path = Path(output_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if progress_callback:
+            progress_callback(20.0, f"Loading audio track slice ({start_sec:.1f}s - {end_sec:.1f}s)...")
+
+        audio_arr, sr = AudioIO.load_audio(a_path)
+        total_len = audio_arr.shape[-1]
+        start_idx = max(0, int(start_sec * sr))
+        end_idx = min(total_len, int(end_sec * sr)) if end_sec > start_sec else total_len
+
+        sliced = audio_arr[..., start_idx:end_idx]
+
+        if denoise:
+            if progress_callback:
+                progress_callback(50.0, "Applying noise reduction to sliced audio...")
+            sliced = cls.process_audio(sliced, sample_rate=sr, config=config)
+
+        if progress_callback:
+            progress_callback(85.0, f"Saving sliced audio to {out_path.name}...")
+
+        AudioIO.save_audio(sliced, sample_rate=sr, output_path=out_path)
+
+        if progress_callback:
+            progress_callback(100.0, f"Saved: {out_path.name}")
+        return out_path
+
+    @classmethod
+    def split_audio_by_duration(
+        cls,
+        audio_path: Path | str,
+        segment_duration_sec: float,
+        output_dir: Path | str,
+        output_format: str = "wav",
+        denoise: bool = False,
+        config: Optional[DenoiseConfig] = None,
+        progress_callback: Optional[Callable[[float, str], None]] = None
+    ) -> list[Path]:
+        """Splits an audio file into fixed-duration segments."""
+        from src.utils.audio_io import AudioIO
+
+        a_path = Path(audio_path)
+        out_dir = Path(output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        audio_arr, sr = AudioIO.load_audio(a_path)
+        total_samples = audio_arr.shape[-1]
+        total_duration = total_samples / float(sr)
+
+        seg_samples = int(max(0.5, segment_duration_sec) * sr)
+        num_segments = int(total_samples // seg_samples)
+        if total_samples % seg_samples > int(0.1 * sr):
+            num_segments += 1
+
+        output_files: list[Path] = []
+        stem = a_path.stem
+        ext = f".{output_format.lower().lstrip('.')}"
+
+        for i in range(num_segments):
+            start = i * seg_samples
+            end = min(total_samples, start + seg_samples)
+            if (end - start) < int(0.1 * sr):
+                continue
+
+            chunk = audio_arr[..., start:end]
+            if denoise:
+                chunk = cls.process_audio(chunk, sample_rate=sr, config=config)
+
+            part_name = f"{stem}_part{i+1:03d}{ext}"
+            part_path = out_dir / part_name
+
+            if progress_callback:
+                pct = (i / num_segments) * 100.0
+                progress_callback(pct, f"Exporting audio segment {i+1}/{num_segments}...")
+
+            AudioIO.save_audio(chunk, sample_rate=sr, output_path=part_path)
+            output_files.append(part_path)
+
+        if progress_callback:
+            progress_callback(100.0, f"Successfully created {len(output_files)} audio segments.")
+        return output_files
+
+    @classmethod
+    def split_audio_by_parts(
+        cls,
+        audio_path: Path | str,
+        num_parts: int,
+        output_dir: Path | str,
+        output_format: str = "wav",
+        denoise: bool = False,
+        config: Optional[DenoiseConfig] = None,
+        progress_callback: Optional[Callable[[float, str], None]] = None
+    ) -> list[Path]:
+        """Splits an audio file into N equal parts."""
+        from src.utils.audio_io import AudioIO
+
+        a_path = Path(audio_path)
+        audio_arr, sr = AudioIO.load_audio(a_path)
+        total_duration = audio_arr.shape[-1] / float(sr)
+
+        num_parts = max(2, min(50, num_parts))
+        seg_duration = total_duration / float(num_parts)
+
+        return cls.split_audio_by_duration(
+            audio_path=audio_path,
+            segment_duration_sec=seg_duration,
+            output_dir=output_dir,
+            output_format=output_format,
+            denoise=denoise,
+            config=config,
+            progress_callback=progress_callback
+        )
+
+    @classmethod
+    def split_audio_by_silence(
+        cls,
+        audio_path: Path | str,
+        output_dir: Path | str,
+        min_silence_len_sec: float = 0.8,
+        silence_threshold_db: float = -38.0,
+        output_format: str = "wav",
+        denoise: bool = False,
+        config: Optional[DenoiseConfig] = None,
+        progress_callback: Optional[Callable[[float, str], None]] = None
+    ) -> list[Path]:
+        """Automatically splits an audio recording at silent pause intervals into separate takes/clips."""
+        from src.utils.audio_io import AudioIO
+
+        a_path = Path(audio_path)
+        out_dir = Path(output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        if progress_callback:
+            progress_callback(10.0, "Analyzing audio track for silent pause intervals...")
+
+        audio_arr, sr = AudioIO.load_audio(a_path)
+        mono = np.mean(audio_arr, axis=0) if audio_arr.ndim > 1 else audio_arr
+        total_samples = len(mono)
+
+        frame_len = int(0.05 * sr)  # 50ms frames
+        hop_len = int(0.025 * sr)   # 25ms hop
+        num_frames = max(1, (total_samples - frame_len) // hop_len)
+
+        # Calculate frame energies in dBFS
+        frame_indices = np.arange(num_frames) * hop_len
+        is_silent = np.zeros(num_frames, dtype=bool)
+
+        for i, idx in enumerate(frame_indices):
+            segment = mono[idx : idx + frame_len]
+            rms = np.sqrt(np.mean(segment ** 2))
+            db = 20.0 * np.log10(max(rms, 1e-9))
+            is_silent[i] = db < silence_threshold_db
+
+        # Find continuous silence blocks >= min_silence_len_sec
+        min_silent_frames = int(min_silence_len_sec / 0.025)
+        split_points = [0]
+        cur_silent_count = 0
+        silence_start_frame = 0
+
+        for i in range(num_frames):
+            if is_silent[i]:
+                if cur_silent_count == 0:
+                    silence_start_frame = i
+                cur_silent_count += 1
+            else:
+                if cur_silent_count >= min_silent_frames:
+                    # Split in the middle of silence
+                    mid_frame = (silence_start_frame + i) // 2
+                    mid_sample = frame_indices[mid_frame]
+                    # Only add if sufficiently far from last split (> 1s)
+                    if (mid_sample - split_points[-1]) > int(1.0 * sr):
+                        split_points.append(mid_sample)
+                cur_silent_count = 0
+
+        split_points.append(total_samples)
+
+        output_files: list[Path] = []
+        stem = a_path.stem
+        ext = f".{output_format.lower().lstrip('.')}"
+        num_clips = len(split_points) - 1
+
+        for i in range(num_clips):
+            s = split_points[i]
+            e = split_points[i + 1]
+            if (e - s) < int(0.5 * sr):
+                continue
+
+            chunk = audio_arr[..., s:e]
+            if denoise:
+                chunk = cls.process_audio(chunk, sample_rate=sr, config=config)
+
+            part_name = f"{stem}_clip{i+1:03d}{ext}"
+            part_path = out_dir / part_name
+
+            if progress_callback:
+                pct = 30.0 + (i / num_clips) * 65.0
+                progress_callback(pct, f"Saving silence-split take {i+1}/{num_clips}...")
+
+            AudioIO.save_audio(chunk, sample_rate=sr, output_path=part_path)
+            output_files.append(part_path)
+
+        if progress_callback:
+            progress_callback(100.0, f"Successfully split into {len(output_files)} audio takes.")
+        return output_files

@@ -23,6 +23,7 @@ class DropZone(ctk.CTkFrame):
         on_file_selected: Callable[[Path], None],
         on_extract_audio: Optional[Callable[[Optional[Path]], None]] = None,
         on_split_video: Optional[Callable[[Optional[Path]], None]] = None,
+        on_split_audio: Optional[Callable[[Optional[Path]], None]] = None,
         **kwargs
     ) -> None:
         super().__init__(
@@ -36,6 +37,7 @@ class DropZone(ctk.CTkFrame):
         self.on_file_selected = on_file_selected
         self.on_extract_audio = on_extract_audio
         self.on_split_video = on_split_video
+        self.on_split_audio = on_split_audio
         self.current_file: Optional[Path] = None
 
         self._build_ui()
@@ -75,7 +77,7 @@ class DropZone(ctk.CTkFrame):
 
         self.browse_btn = ctk.CTkButton(
             self.btn_row,
-            text="Browse Media File...",
+            text="Browse Media...",
             font=Theme.FONT_BODY,
             fg_color=Theme.ACCENT_CYAN,
             hover_color=Theme.ACCENT_CYAN_HOVER,
@@ -83,9 +85,9 @@ class DropZone(ctk.CTkFrame):
             corner_radius=Theme.CORNER_RADIUS_SM,
             command=self._on_browse_click,
             height=32,
-            width=150
+            width=135
         )
-        self.browse_btn.pack(side="left", padx=4)
+        self.browse_btn.pack(side="left", padx=3)
 
         self.extract_audio_btn = ctk.CTkButton(
             self.btn_row,
@@ -97,9 +99,9 @@ class DropZone(ctk.CTkFrame):
             corner_radius=Theme.CORNER_RADIUS_SM,
             command=self._on_extract_audio_click,
             height=32,
-            width=140
+            width=135
         )
-        self.extract_audio_btn.pack(side="left", padx=4)
+        self.extract_audio_btn.pack(side="left", padx=3)
 
         self.split_video_btn = ctk.CTkButton(
             self.btn_row,
@@ -111,9 +113,23 @@ class DropZone(ctk.CTkFrame):
             corner_radius=Theme.CORNER_RADIUS_SM,
             command=self._on_split_video_click,
             height=32,
-            width=130
+            width=125
         )
-        self.split_video_btn.pack(side="left", padx=4)
+        self.split_video_btn.pack(side="left", padx=3)
+
+        self.split_audio_btn = ctk.CTkButton(
+            self.btn_row,
+            text="✂️ Split Audio...",
+            font=Theme.FONT_BODY,
+            fg_color="#374151",
+            hover_color="#4B5563",
+            text_color=Theme.TEXT_PRIMARY,
+            corner_radius=Theme.CORNER_RADIUS_SM,
+            command=self._on_split_audio_click,
+            height=32,
+            width=125
+        )
+        self.split_audio_btn.pack(side="left", padx=3)
 
         # Loaded File Metadata Badge Frame (Hidden initially)
         self.info_card = ctk.CTkFrame(
@@ -147,7 +163,7 @@ class DropZone(ctk.CTkFrame):
         self.file_meta_label.pack(anchor="w")
 
         # Quick Split Video Chip
-        self.quick_split_btn = ctk.CTkButton(
+        self.quick_split_video_btn = ctk.CTkButton(
             self.info_card,
             text="✂️ Split Video",
             font=Theme.FONT_SMALL,
@@ -158,6 +174,20 @@ class DropZone(ctk.CTkFrame):
             height=28,
             corner_radius=Theme.CORNER_RADIUS_SM,
             command=self._on_split_video_click
+        )
+
+        # Quick Split Audio Chip
+        self.quick_split_audio_btn = ctk.CTkButton(
+            self.info_card,
+            text="✂️ Split Audio",
+            font=Theme.FONT_SMALL,
+            fg_color=Theme.CARD_BG_HOVER,
+            hover_color=Theme.CARD_BORDER,
+            text_color="#A78BFA",
+            width=100,
+            height=28,
+            corner_radius=Theme.CORNER_RADIUS_SM,
+            command=self._on_split_audio_click
         )
 
         # Quick Extract Audio Chip for Loaded Videos
@@ -192,6 +222,10 @@ class DropZone(ctk.CTkFrame):
         if self.on_split_video:
             self.on_split_video(self.current_file)
 
+    def _on_split_audio_click(self) -> None:
+        if self.on_split_audio:
+            self.on_split_audio(self.current_file)
+
     def set_loaded_file(self, path: Path, metadata_str: str = "") -> None:
         """Updates UI display with loaded file information."""
         self.current_file = path
@@ -209,11 +243,13 @@ class DropZone(ctk.CTkFrame):
         self.file_meta_label.configure(text=meta)
 
         if is_video:
-            self.quick_split_btn.pack(side="right", padx=(4, 12), pady=6)
+            self.quick_split_audio_btn.pack_forget()
+            self.quick_split_video_btn.pack(side="right", padx=(4, 12), pady=6)
             self.quick_extract_btn.pack(side="right", padx=4, pady=6)
         else:
-            self.quick_split_btn.pack_forget()
+            self.quick_split_video_btn.pack_forget()
             self.quick_extract_btn.pack_forget()
+            self.quick_split_audio_btn.pack(side="right", padx=(4, 12), pady=6)
 
         self.info_card.pack(fill="x", expand=True, pady=(8, 0))
 

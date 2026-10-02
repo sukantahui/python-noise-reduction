@@ -72,3 +72,91 @@ def test_audio_engine_presets():
 
     preset2 = AudioDenoiseEngine.get_preset("Mild Background Hiss")
     assert preset2.reduction_strength == 0.55
+
+
+def test_trim_audio_range(tmp_path, synthetic_clean_audio, sample_rate):
+    """Verifies that trim_audio_range accurately slices an audio file."""
+    from src.utils.audio_io import AudioIO
+    wav_path = tmp_path / "test_input.wav"
+    out_path = tmp_path / "test_trimmed.wav"
+    AudioIO.save_audio(synthetic_clean_audio, sample_rate, wav_path)
+
+    res = AudioDenoiseEngine.trim_audio_range(
+        audio_path=wav_path,
+        start_sec=0.5,
+        end_sec=1.5,
+        output_path=out_path,
+        denoise=False
+    )
+    assert res.exists()
+    loaded, sr = AudioIO.load_audio(res)
+    assert sr == sample_rate
+    # Duration should be ~1.0 second (44100 samples)
+    assert abs(loaded.shape[-1] - 44100) < 50
+
+
+def test_split_audio_by_duration(tmp_path, synthetic_clean_audio, sample_rate):
+    """Verifies that split_audio_by_duration produces segments of expected lengths."""
+    from src.utils.audio_io import AudioIO
+    wav_path = tmp_path / "test_input_dur.wav"
+    out_dir = tmp_path / "dur_segments"
+    AudioIO.save_audio(synthetic_clean_audio, sample_rate, wav_path)  # 2.0s
+
+    segments = AudioDenoiseEngine.split_audio_by_duration(
+        audio_path=wav_path,
+        segment_duration_sec=1.0,
+        output_dir=out_dir,
+        output_format="wav"
+    )
+    assert len(segments) == 2
+    for seg in segments:
+        assert seg.exists()
+
+
+def test_split_audio_by_parts(tmp_path, synthetic_clean_audio, sample_rate):
+    """Verifies that split_audio_by_parts splits an audio track into N equal pieces."""
+    from src.utils.audio_io import AudioIO
+    wav_path = tmp_path / "test_input_parts.wav"
+    out_dir = tmp_path / "parts_segments"
+    AudioIO.save_audio(synthetic_clean_audio, sample_rate, wav_path)  # 2.0s
+
+    segments = AudioDenoiseEngine.split_audio_by_parts(
+        audio_path=wav_path,
+        num_parts=4,
+        output_dir=out_dir,
+        output_format="wav"
+    )
+    assert len(segments) == 4
+    for seg in segments:
+        assert seg.exists()
+
+
+def test_split_audio_by_silence(tmp_path, sample_rate):
+    """Verifies silence detection and splitting on audio containing speech takes with pauses."""
+    from src.utils.audio_io import AudioIO
+    # Create 5s audio with tone, 1s silence, tone
+    t = np.linspace(0, 5.0, int(sample_rate * 5.0), endpoint=False)
+    signal = np.zeros_like(t)
+    # Take 1: 0.0s to 1.8s
+    take1_idx = (t >= 0.0) & (t <= 1.8)
+    signal[take1_idx] = 0.5 * np.sin(2 * np.pi * 440 * t[take1_idx])
+    # Silence: 1.8s to 3.0s (1.2s pause)
+    # Take 2: 3.0s to 5.0s
+    take2_idx = (t >= 3.0) & (t <= 5.0)
+    signal[take2_idx] = 0.5 * np.sin(2 * np.pi * 880 * t[take2_idx])
+
+    wav_path = tmp_path / "speech_with_pauses.wav"
+    out_dir = tmp_path / "silence_takes"
+    AudioIO.save_audio(signal.astype(np.float32), sample_rate, wav_path)
+
+    takes = AudioDenoiseEngine.split_audio_by_silence(
+        audio_path=wav_path,
+        output_dir=out_dir,
+        min_silence_len_sec=0.8,
+        silence_threshold_db=-30.0,
+        output_format="wav"
+    )
+    assert len(takes) >= 2
+    for take in takes:
+        assert take.exists()
+

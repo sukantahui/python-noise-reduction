@@ -7,6 +7,7 @@ from .batch_queue_view import BatchQueueView
 from .about_dialog import AboutDialog
 from .extract_dialog import ExtractAudioDialog
 from .video_splitter_dialog import VideoSplitterDialog
+from .audio_splitter_dialog import AudioSplitterDialog
 
 __all__ = [
     "DropZone",
@@ -16,5 +17,6 @@ __all__ = [
     "BatchQueueView",
     "AboutDialog",
     "ExtractAudioDialog",
-    "VideoSplitterDialog"
+    "VideoSplitterDialog",
+    "AudioSplitterDialog"
 ]
